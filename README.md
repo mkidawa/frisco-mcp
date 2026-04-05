@@ -4,6 +4,8 @@ A TypeScript **Model Context Protocol (MCP)** server that lets AI assistants (Cl
 
 > **Security First** — The server **never** stores your email or password. You log in manually in a visible browser window; only session cookies are persisted locally.
 
+![Example: AI adding products from a shopping list to the Frisco cart](docs/example.png)
+
 ---
 
 ## Features
