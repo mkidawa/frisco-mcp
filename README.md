@@ -10,69 +10,64 @@ A TypeScript **Model Context Protocol (MCP)** server that lets AI assistants (Cl
 
 ### Session
 
-| Tool | Description |
-|------|-------------|
-| `login` | Opens a visible Chromium window at the login page. You log in manually; the server polls for success and saves session cookies. |
-| `finish_session` | Opens the browser at the checkout page so you can select a delivery slot and pay. **No automatic payment.** |
-| `clear_session` | Closes the browser and deletes the saved session file. |
+| Tool             | Description                                                                                                                     |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `login`          | Opens a visible Chromium window at the login page. You log in manually; the server polls for success and saves session cookies. |
+| `finish_session` | Opens the browser at the checkout page so you can select a delivery slot and pay. **No automatic payment.**                     |
+| `clear_session`  | Closes the browser and deletes the saved session file.                                                                          |
 
 ### Cart
 
-| Tool | Description |
-|------|-------------|
-| `add_items_to_cart` | Accepts a JSON list of products (name, search query, quantity). Searches for each item and clicks "Add to cart". Optionally clears the cart first. |
-| `view_cart` | Returns the current cart contents and total price. |
-| `remove_item_from_cart` | Removes a specific product from the cart by name (partial match). |
+| Tool                    | Description                                                                                                                                        |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `add_items_to_cart`     | Accepts a JSON list of products (name, search query, quantity). Searches for each item and clicks "Add to cart". Optionally clears the cart first. |
+| `view_cart`             | Returns the current cart contents and total price.                                                                                                 |
+| `remove_item_from_cart` | Removes a specific product from the cart by name (partial match).                                                                                  |
 
 ### Products
 
-| Tool | Description |
-|------|-------------|
-| `search_products` | Searches frisco.pl and returns top N results with prices. |
+| Tool               | Description                                                                                                   |
+| ------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `search_products`  | Searches frisco.pl and returns top N results with prices.                                                     |
 | `get_product_info` | Returns detailed product info: nutritional values (macros per 100g), weight/grammage, ingredients, and price. |
 
 ### Logs
 
-| Tool | Description |
-|------|-------------|
-| `get_logs` | Returns JSONL log events for the current or a specific session. |
-| `tail_logs` | Returns the N most recent log events. |
+| Tool        | Description                                                     |
+| ----------- | --------------------------------------------------------------- |
+| `get_logs`  | Returns JSONL log events for the current or a specific session. |
+| `tail_logs` | Returns the N most recent log events.                           |
 
 ---
 
 ## Architecture
 
-```
-MCP Client (Claude / Gemini / …)
-        │  stdio
-        ▼
-  ┌─────────────┐
-  │  index.ts    │  MCP server — tool registration, executeTool wrapper
-  │  (McpServer) │
-  └──────┬───────┘
-         │
-    ┌────┴─────────────────────────────┐
-    │          Tool modules             │
-    │    session · cart · products          │
-    └────┬────────┬────────┬───────────┘
-         │        │        │
-   ┌─────┴──┐ ┌──┴───┐ ┌──┴──────┐
-   │auth.ts │ │browser│ │helpers.ts│
-   │cookies │ │.ts    │ │nav/parse │
-   └───┬────┘ └──┬───┘ └──┬──────┘
-       │         │        │
-       ▼         ▼        ▼
-  session.json  Playwright  frisco.pl
-                (Chromium)
+```mermaid
+flowchart LR
+    A[MCP Client / AI Assistant] -->|stdio| B[src/index.ts<br/>McpServer]
 
-  ~/.frisco-mcp/
-  ├── session.json        ← session cookies
-  ├── current-session.json
-  └── logs/
-      └── <session-id>.jsonl
+    B --> C[Session Tools<br/>src/tools/session.ts]
+    B --> D[Cart Tools<br/>src/tools/cart.ts]
+    B --> E[Product Tools<br/>src/tools/products.ts]
+
+    C --> G[src/browser.ts<br/>Playwright singleton]
+    D --> G
+    E --> G
+
+    C --> H[src/auth.ts<br/>session cookies]
+    D --> H
+    E --> H
+
+    D --> I[src/tools/helpers.ts<br/>navigation & parsing]
+    E --> I
+
+    H --> J[(~/.frisco-mcp/session.json)]
+    B --> L[src/logger.ts] --> M[(~/.frisco-mcp/logs/)]
+    G --> K[frisco.pl 🌐]
+    I --> K
 ```
 
-Interactive Mermaid diagrams: [`docs/DIAGRAMS.md`](docs/DIAGRAMS.md)
+More diagrams (login flow, cart flow): [`docs/DIAGRAMS.md`](docs/DIAGRAMS.md)
 
 ---
 
@@ -150,27 +145,27 @@ Add to your Cursor MCP settings (`~/.cursor/mcp.json` or workspace `.cursor/mcp.
 
 ### 1. Log in
 
-> *"Log me in to Frisco"*
+> _"Log me in to Frisco"_
 
 The `login` tool opens a Chromium window at `frisco.pl/login`. Log in manually — the server waits up to 5 minutes and saves your session cookies once it detects a successful login.
 
 ### 2. Shop
 
-> *"Add 2 liters of milk and wheat bread to cart"*
+> _"Add 2 liters of milk and wheat bread to cart"_
 
 The `add_items_to_cart` tool searches for each product, picks the first match, and clicks "Add to cart" the requested number of times.
 
-> *"Find me natural yogurt"*
+> _"Find me natural yogurt"_
 
 The `search_products` tool returns a list of matching products with prices.
 
-> *"Remove the butter from my cart"*
+> _"Remove the butter from my cart"_
 
 The `remove_item_from_cart` tool finds a product in the cart by name and removes it.
 
 ### 3. Checkout
 
-> *"Finish my Frisco session"*
+> _"Finish my Frisco session"_
 
 The `finish_session` tool opens your cart at `frisco.pl/stn,cart` so you can choose a delivery slot and pay — **the server never performs payment automatically**.
 
@@ -211,11 +206,11 @@ frisco-mcp/
 
 All user data is stored locally in `~/.frisco-mcp/`:
 
-| File | Purpose |
-|------|---------|
-| `session.json` | Saved browser cookies (no credentials) |
-| `current-session.json` | Pointer to the active log session |
-| `logs/<id>.jsonl` | Per-session event logs |
+| File                   | Purpose                                |
+| ---------------------- | -------------------------------------- |
+| `session.json`         | Saved browser cookies (no credentials) |
+| `current-session.json` | Pointer to the active log session      |
+| `logs/<id>.jsonl`      | Per-session event logs                 |
 
 ---
 
@@ -246,14 +241,14 @@ Tests run automatically on every **push** and **pull request** to `master` via G
 
 ## Tech Stack
 
-| Library | Role |
-|---------|------|
-| [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/typescript-sdk) | MCP server framework |
-| [`playwright`](https://playwright.dev/) | Browser automation (Chromium) |
-| [`cheerio`](https://cheerio.js.org/) | HTML parsing for product info |
-| [`zod`](https://zod.dev/) | Input schema validation |
-| [`typescript`](https://www.typescriptlang.org/) | Language & build |
-| [`vitest`](https://vitest.dev/) | Unit testing framework |
+| Library                                                                               | Role                          |
+| ------------------------------------------------------------------------------------- | ----------------------------- |
+| [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/typescript-sdk) | MCP server framework          |
+| [`playwright`](https://playwright.dev/)                                               | Browser automation (Chromium) |
+| [`cheerio`](https://cheerio.js.org/)                                                  | HTML parsing for product info |
+| [`zod`](https://zod.dev/)                                                             | Input schema validation       |
+| [`typescript`](https://www.typescriptlang.org/)                                       | Language & build              |
+| [`vitest`](https://vitest.dev/)                                                       | Unit testing framework        |
 
 ---
 
