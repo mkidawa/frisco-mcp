@@ -3,18 +3,21 @@ import { ensureLoggedIn } from '../auth.js';
 import { searchNavigateAndCache, dismissPopups } from './helpers.js';
 import type { CartItem } from '../types.js';
 
-async function clearCart(page: import('playwright').Page): Promise<number> {
+async function clearCart(page: import('playwright').Page): Promise<void> {
   await page.goto('https://www.frisco.pl/stn,cart', { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(2_000);
-  let removed = 0;
-  for (let i = 0; i < 100; i++) {
-    const btn = page.locator('.horizontal-product-box__delete-button').first();
-    if (!(await btn.isVisible())) break;
-    await btn.click();
-    await page.waitForTimeout(600);
-    removed++;
+
+  const clearBtn = page.locator(
+    '.checkout_products-actions-clear-cart, .cart-side-box_actions_clear-cart'
+  ).first();
+
+  if (await clearBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    await clearBtn.click();
+    const confirmBtn = page.locator('.notification-popup_buttons .button.cta');
+    await confirmBtn.waitFor({ state: 'visible', timeout: 5_000 });
+    await confirmBtn.click();
+    await page.waitForTimeout(2_000);
   }
-  return removed;
 }
 
 export async function addItemsToCart(
