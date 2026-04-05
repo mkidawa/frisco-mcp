@@ -254,4 +254,4 @@ Tests run automatically on every **push** and **pull request** to `master` via G
 
 ## License
 
-Private project — not published to npm.
+This project is licensed under the [MIT License](LICENSE).
