@@ -5,12 +5,14 @@ You have access to the Frisco MCP server. Your task is to add all products from 
 2. Process items **one by one, sequentially** — never add multiple items in parallel.
 3. For each item on the shopping list:
    a. Use `search_products` (topN: 5) to find matching products.
-   b. Pick the product whose **grammage/weight/pieces (szt)** best matches the required amount. If the shopping list says "500g", prefer a single 500g product over 2×250g. If it says "2 szt", look for a pack of 2 or add quantity 2 of a single piece.
-   c. If the exact weight is not available, prefer the closest larger size (e.g. 450g list → pick 500g product).
-   d. If multiple products match equally well, prefer the cheapest one.
-   e. Calculate the correct **quantity** to match or exceed the required amount (e.g. list says "1 kg flour" and the best match is 500g → quantity 2).
-   f. Use `add_items_to_cart` with a single-item JSON array: `[{"name":"...", "searchQuery":"...", "quantity": N}]`.
-   g. Report the result (success/failure) before moving to the next item.
+   b. For candidate products from search results, call `get_product_info` to verify details (grammage/weight/pieces, price, and product type).
+   c. Pick the product whose **grammage/weight/pieces (szt)** best matches the required amount. If the shopping list says "500g", prefer a single 500g product over 2×250g. If it says "2 szt", look for a pack of 2 or add quantity 2 of a single piece.
+   d. If the exact weight is not available, prefer the closest larger size (e.g. 450g list → pick 500g product).
+   e. If multiple products match equally well, prefer the cheapest one.
+   f. Calculate the correct **quantity** to match or exceed the required amount (e.g. list says "1 kg flour" and the best match is 500g → quantity 2).
+   g. Use `add_items_to_cart` with a single-item JSON array: `[{"name":"...", "searchQuery":"...", "quantity": N}]`.
+   h. Do not ask for confirmation before adding each item; add automatically according to the rules.
+   i. Report the result (success/failure) before moving to the next item.
 4. **Handling unavailable products:**
    - Products marked as ⚠️ NIEDOSTĘPNY in search results are temporarily out of stock.
    - When `add_items_to_cart` reports a product as "chwilowo niedostępny", it also lists available alternatives from the search results.
