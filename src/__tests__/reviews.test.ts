@@ -3,7 +3,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { extractReviewsFromHtml, formatReviews } from '../tools/helpers.js';
 
-const PRODUCT_HTML_PATH = join(__dirname, '..', '..', 'test_data', 'product.html');
+const PRODUCT_HTML_PATH = join(__dirname, '..', '..', 'test_data', 'products', 'skyr.html');
 
 describe('extractReviewsFromHtml from product.html', () => {
   const html = readFileSync(PRODUCT_HTML_PATH, 'utf-8');

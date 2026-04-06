@@ -65,14 +65,34 @@ function extractMacrosFromText(text: string): ProductPageInfo['macros'] {
 
 export function extractProductPageInfoFromHtml(html: string): ProductPageInfo {
   const $ = load(html);
-  const name = normalizeWhitespace($('h1').first().text()) || '?';
-  const price = normalizeWhitespace($('[class*="price"], [class*="Price"]').first().text());
-  const bodyText = normalizeWhitespace($('body').text());
+
+  const nameFromMeta = $('div.new-product-page__product-details[itemprop="name"]').attr('content');
+  const nameFromH1 = normalizeWhitespace($('h1.title.product').first().text());
+  const name = nameFromMeta || nameFromH1 || normalizeWhitespace($('h1').first().text()) || '?';
+
+  let price = '';
+  const priceMeta = $('meta[itemprop="price"]').attr('content');
+  if (priceMeta) {
+    const numeric = parseFloat(priceMeta);
+    price = Number.isFinite(numeric)
+      ? `${numeric.toFixed(2).replace('.', ',')} zł`
+      : priceMeta;
+  }
+  if (!price) {
+    const priceUi = $('.f-pdp__price-amount--emphasized').first().text();
+    if (priceUi) price = `${normalizeWhitespace(priceUi)} zł`;
+  }
 
   let weight: string | null = null;
-  const weightEl = $('.new-product-page__grammage-gross-parameter strong').first();
-  if (weightEl.length) {
-    weight = normalizeWhitespace(weightEl.text());
+  const grammageDiv = $('div.product-grammage').first();
+  if (grammageDiv.length) {
+    const rawGrammage = normalizeWhitespace(grammageDiv.text());
+    const gm = rawGrammage.match(/~?([\d.,]+\s*(?:g|ml|kg|l|szt\.?))\b/i);
+    if (gm) weight = gm[1].replace(/\u00a0/g, ' ');
+  }
+  if (!weight) {
+    const paramEl = $('.new-product-page__grammage-gross-parameter strong').first();
+    if (paramEl.length) weight = normalizeWhitespace(paramEl.text());
   }
   if (!weight) {
     const titleText = $('title').text();
@@ -81,64 +101,80 @@ export function extractProductPageInfoFromHtml(html: string): ProductPageInfo {
   }
 
   let ingredients: string | null = null;
-  const skladBlockText = findExpandableBlockText($, 'Skład i alergeny');
-  if (skladBlockText.length > 5) {
-    ingredients = skladBlockText;
-  } else {
-    const skladColon = bodyText.match(/Sk[łl]ad\s*[:：]\s*([^\n]{5,})/i);
-    if (skladColon) {
-      ingredients = normalizeWhitespace(skladColon[1]);
-    } else {
-      const skladSection = bodyText.match(/Sk[łl]ad i alergeny[\s\S]{0,60}\s+([^\n]{5,})/i);
-      if (skladSection) ingredients = normalizeWhitespace(skladSection[1]);
+  const bbIngredients = $('div.brandbank-ingredients__content p, div.brandbank-ingredients__space-maker p');
+  if (bbIngredients.length) {
+    const parts: string[] = [];
+    bbIngredients.each((_, el) => {
+      const t = normalizeWhitespace($(el).text());
+      if (t.length > 2) parts.push(t);
+    });
+    if (parts.length) ingredients = parts.join('; ');
+  }
+  if (!ingredients) {
+    const skladBlock = findExpandableBlockText($, 'Skład i alergeny');
+    if (skladBlock.length > 5 && skladBlock.length < 2000) {
+      ingredients = skladBlock;
     }
   }
 
-  const nutritionText = findExpandableBlockText($, 'Wartości odżywcze');
-  let macros = extractMacrosFromText(nutritionText);
+  const hasGauges = $('.new-product-page__nutrient-gauge').length > 0;
+  const macros = hasGauges ? extractMacrosFromGauges($) : {};
 
-  if (Object.keys(macros).length === 0) {
-    const extractMacro = (labelRaw: string, valueRaw: string): void => {
-      const label = normalizeWhitespace(labelRaw).toLowerCase();
-      const value = normalizeWhitespace(valueRaw);
-      if (!label || !value) return;
-      for (const [key, canonical] of MACRO_KEY_MAP) {
-        if (label.includes(key) && !macros[canonical]) {
-          macros[canonical] = value;
-          break;
-        }
-      }
-    };
-
-    $('tr').each((_, tr) => {
-      const cells = $(tr).find('td, th');
-      if (cells.length >= 2) {
-        extractMacro($(cells[0]).text(), $(cells[1]).text());
-      }
-    });
-
-    $('dt').each((_, dt) => {
-      const dd = $(dt).next('dd');
-      if (dd.length) extractMacro($(dt).text(), dd.text());
-    });
-
-    $('div, span, p, li').each((_, el) => {
-      const current = $(el);
-      if (current.children().length > 2) return;
-      const text = normalizeWhitespace(current.text());
-      if (!text || text.length > 60) return;
-      const next = current.next();
-      if (!next.length || next.children().length > 2) return;
-      extractMacro(text, next.text());
-    });
+  if (!hasGauges && Object.keys(macros).length === 0) {
+    const hasFppTable = $('div.fpp table').length > 0;
+    if (hasFppTable) {
+      extractMacrosFromTable($, macros);
+    }
   }
 
-  if (!macros.kcal) {
-    const kcalMatch = bodyText.match(/(\d+(?:[.,]\d+)?)\s*kcal/i);
-    if (kcalMatch) macros.kcal = `${kcalMatch[1]} kcal`;
+  if (!hasGauges && Object.keys(macros).length === 0) {
+    const nutritionText = findExpandableBlockText($, 'Wartości odżywcze');
+    if (nutritionText) {
+      const textMacros = extractMacrosFromText(nutritionText);
+      Object.assign(macros, textMacros);
+    }
   }
 
   return { name, price, weight, ingredients, macros };
+}
+
+function extractMacrosFromGauges($: ReturnType<typeof load>): ProductPageInfo['macros'] {
+  const macros: ProductPageInfo['macros'] = {};
+  const gauges = $('.new-product-page__nutrient-gauge');
+
+  gauges.each((_, gauge) => {
+    const title = normalizeWhitespace($(gauge).find('.new-product-page__nutrient-gauge-title').text()).toLowerCase();
+    const value = normalizeWhitespace($(gauge).find('.new-product-page__nutrient-gauge-text').text());
+    if (!title || !value) return;
+    const numericValue = parseFloat(value.replace(',', '.'));
+    if (!Number.isFinite(numericValue) || numericValue === 0) return;
+
+    for (const [key, canonical] of MACRO_KEY_MAP) {
+      if (title.includes(key) && !macros[canonical]) {
+        macros[canonical] = value;
+        break;
+      }
+    }
+  });
+
+  return macros;
+}
+
+function extractMacrosFromTable($: ReturnType<typeof load>, macros: ProductPageInfo['macros']): void {
+  $('div.fpp table tbody tr').each((_, tr) => {
+    const cells = $(tr).find('td');
+    if (cells.length < 2) return;
+    const label = normalizeWhitespace($(cells[0]).text()).toLowerCase();
+    const value = normalizeWhitespace($(cells[1]).text());
+    if (!label || !value) return;
+
+    for (const [key, canonical] of MACRO_KEY_MAP) {
+      if (label.includes(key) && !macros[canonical]) {
+        macros[canonical] = value;
+        break;
+      }
+    }
+  });
 }
 
 export interface SearchNavigateResult {
