@@ -160,7 +160,7 @@ server.registerTool(
   "clear_cart",
   {
     description:
-      "Empties the Frisco cart using the site’s “clear cart” button and confirmation dialog. Run view_cart if you need to verify.",
+      "Empties the Frisco cart using the site's clear-cart button and confirmation dialog. Run view_cart if you need to verify.",
   },
   async () => {
     return executeTool("clear_cart", {}, () => clearCart());
