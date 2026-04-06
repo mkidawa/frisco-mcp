@@ -529,6 +529,7 @@ export function formatPromotions(data: { totalSavings: string; promotions: CartP
 
 export function formatProductInfo(product: Product): string {
   const lines: string[] = [`🛍️ ${product.name}`];
+  if (product.url) lines.push(`🔗 URL: ${product.url}`);
   if (product.price) lines.push(`💰 Price: ${product.price}`);
   if (product.weight) lines.push(`📦 Weight: ${product.weight}`);
   lines.push('');

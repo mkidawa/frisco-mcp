@@ -239,20 +239,21 @@ async function addProductFromCurrentProductPage(
   page: import("playwright").Page,
   quantity: number,
 ): Promise<{ ok: boolean; reason?: string }> {
-  const addButton = page
-    .locator(
-      ".product-box-layout__cart .cart-button_add, .cart-button_add.button.primary.alone, .cart-button_add",
-    )
+  const mainActions = page.locator(".new-product-page__actions");
+
+  const addButton = mainActions
+    .locator(".cart-button_add")
     .first();
-  const plusButton = page
-    .locator(
-      ".product-box-layout__cart .cart-button_plus .cart-button__button, .cart-button_plus .cart-button__button, .cart-button_plus button",
-    )
+  const plusButton = mainActions
+    .locator(".cart-button_plus .cart-button__button, .cart-button_plus button")
+    .first();
+  const quantityInput = mainActions
+    .locator("input.cart-button_quantity")
     .first();
 
   for (let i = 0; i < quantity; i++) {
     const canAdd = await addButton
-      .isVisible({ timeout: 1_000 })
+      .isVisible({ timeout: 1_500 })
       .catch(() => false);
     if (canAdd) {
       await addButton.click();
@@ -261,7 +262,7 @@ async function addProductFromCurrentProductPage(
     }
 
     const canIncrease = await plusButton
-      .isVisible({ timeout: 1_000 })
+      .isVisible({ timeout: 1_500 })
       .catch(() => false);
     if (canIncrease) {
       await plusButton.click();
@@ -276,7 +277,11 @@ async function addProductFromCurrentProductPage(
     };
   }
 
-  return { ok: true };
+  const finalQty = await quantityInput
+    .inputValue()
+    .catch(() => null);
+
+  return { ok: true, reason: finalQty ? `quantity: ${finalQty}` : undefined };
 }
 
 function pickResultForCartItem(
