@@ -296,7 +296,6 @@ async function run() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   await logEvent("server_started");
-  console.error("Frisco MCP server running on stdio");
 }
 
 run().catch((error) => {
