@@ -1,5 +1,5 @@
-import { getPage, getContext } from '../browser.js';
-import { ensureLoggedIn } from '../auth.js';
+import { getPage, getContext } from "../browser.js";
+import { ensureLoggedIn } from "../auth.js";
 import {
   searchNavigateAndCache,
   dismissPopups,
@@ -7,29 +7,56 @@ import {
   formatCartIssues,
   extractPromotionsFromHtml,
   formatPromotions,
-} from './helpers.js';
-import type { CartItem } from '../types.js';
+} from "./helpers.js";
+import type { CartItem } from "../types.js";
 
-async function clearCart(page: import('playwright').Page): Promise<void> {
-  await page.goto('https://www.frisco.pl/stn,cart', { waitUntil: 'domcontentloaded' });
+async function clearCartViaUi(
+  page: import("playwright").Page,
+): Promise<boolean> {
+  await page.goto("https://www.frisco.pl/stn,cart", {
+    waitUntil: "domcontentloaded",
+  });
   await page.waitForTimeout(2_000);
 
-  const clearBtn = page.locator(
-    '.checkout_products-actions-clear-cart, .cart-side-box_actions_clear-cart'
-  ).first();
+  const clearBtn = page
+    .locator(
+      ".checkout_products-actions-clear-cart, .cart-side-box_actions_clear-cart",
+    )
+    .first();
 
   if (await clearBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
     await clearBtn.click();
-    const confirmBtn = page.locator('.notification-popup_buttons .button.cta');
-    await confirmBtn.waitFor({ state: 'visible', timeout: 5_000 });
+    const confirmBtn = page.locator(".notification-popup_buttons .button.cta");
+    await confirmBtn.waitFor({ state: "visible", timeout: 5_000 });
     await confirmBtn.click();
     await page.waitForTimeout(2_000);
+    return true;
   }
+  return false;
+}
+
+export async function clearCart(): Promise<string> {
+  const page = await getPage();
+  const context = await getContext();
+  await ensureLoggedIn(page, context);
+  await dismissPopups(page);
+
+  const clicked = await clearCartViaUi(page);
+  const cartSummary = await viewCart();
+
+  if (!clicked) {
+    return (
+      "⚠️ Nie znaleziono przycisku „wyczyść koszyk” (layout mógł się zmienić). Koszyk mógł pozostać bez zmian.\n\n" +
+      cartSummary
+    );
+  }
+
+  return "🛒 Wysłano czyszczenie koszyka w UI Frisco.\n\n" + cartSummary;
 }
 
 export async function addItemsToCart(
   items: string,
-  options: { clearCartFirst?: boolean } = {}
+  options: { clearCartFirst?: boolean } = {},
 ): Promise<string> {
   let products: CartItem[];
   try {
@@ -45,18 +72,19 @@ export async function addItemsToCart(
 
   const shouldClearCart = options.clearCartFirst === true;
   if (shouldClearCart) {
-    await clearCart(page);
+    await clearCartViaUi(page);
   }
 
   const results: string[] = [];
 
   for (const item of products) {
-    const name = item.name ?? '?';
+    const name = item.name ?? "?";
     const query = item.searchQuery ?? name;
     const qty = item.quantity ?? 1;
 
     try {
-      const { foundName, addButton, unavailable, alternatives } = await searchNavigateAndCache(page, query);
+      const { foundName, addButton, unavailable, alternatives } =
+        await searchNavigateAndCache(page, query);
 
       if (!addButton) {
         if (unavailable) {
@@ -64,8 +92,8 @@ export async function addItemsToCart(
           if (alternatives && alternatives.length > 0) {
             msg += `\n   Dostępne alternatywy:`;
             for (const alt of alternatives) {
-              const w = alt.weight ? ` [${alt.weight}]` : '';
-              const p = alt.price ? ` | ${alt.price}` : '';
+              const w = alt.weight ? ` [${alt.weight}]` : "";
+              const p = alt.price ? ` | ${alt.price}` : "";
               msg += `\n   - ${alt.name}${w}${p}`;
             }
           }
@@ -88,18 +116,18 @@ export async function addItemsToCart(
     }
   }
 
-  const added = results.filter(r => r.startsWith('✅')).length;
+  const added = results.filter((r) => r.startsWith("✅")).length;
   return [
     `🛒 Added ${added}/${products.length} items:`,
-    '',
-    results.join('\n'),
-    '',
-    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-    '⚠️  Payment is YOUR responsibility.',
-    '👉 https://www.frisco.pl/stn,cart',
-    'The browser is open — go to checkout when ready.',
-    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-  ].join('\n');
+    "",
+    results.join("\n"),
+    "",
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "⚠️  Payment is YOUR responsibility.",
+    "👉 https://www.frisco.pl/stn,cart",
+    "The browser is open — go to checkout when ready.",
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+  ].join("\n");
 }
 
 export async function removeItemFromCart(productName: string): Promise<string> {
@@ -107,7 +135,9 @@ export async function removeItemFromCart(productName: string): Promise<string> {
   const context = await getContext();
   await ensureLoggedIn(page, context);
 
-  await page.goto('https://www.frisco.pl/stn,cart', { waitUntil: 'domcontentloaded' });
+  await page.goto("https://www.frisco.pl/stn,cart", {
+    waitUntil: "domcontentloaded",
+  });
   await page.waitForTimeout(2_000);
 
   const needle = productName.toLowerCase();
@@ -115,31 +145,51 @@ export async function removeItemFromCart(productName: string): Promise<string> {
   try {
     const removed = await page.evaluate((target: string) => {
       function cartLineDisplayName(box: HTMLElement): string | null {
-        const tImg = box.querySelector<HTMLImageElement>('.horizontal-product-box__product-img img[title]');
-        if (tImg?.title) return tImg.title.replace(/\s+/g, ' ').trim();
-        const aImg = box.querySelector<HTMLImageElement>('.horizontal-product-box__product-img img[alt]');
-        if (aImg?.alt) return aImg.alt.replace(/\s+/g, ' ').trim();
-        const brand = box.querySelector<HTMLElement>('.f-hpc__brand');
-        const bare = box.querySelector<HTMLElement>('.f-hpc__bare-name');
+        const tImg = box.querySelector<HTMLImageElement>(
+          ".horizontal-product-box__product-img img[title]",
+        );
+        if (tImg?.title) return tImg.title.replace(/\s+/g, " ").trim();
+        const aImg = box.querySelector<HTMLImageElement>(
+          ".horizontal-product-box__product-img img[alt]",
+        );
+        if (aImg?.alt) return aImg.alt.replace(/\s+/g, " ").trim();
+        const brand = box.querySelector<HTMLElement>(".f-hpc__brand");
+        const bare = box.querySelector<HTMLElement>(".f-hpc__bare-name");
         if (brand && bare) {
-          const bt = (brand.getAttribute('title') || brand.textContent || '').trim();
-          const nt = (bare.getAttribute('title') || bare.textContent || '').trim();
-          if (bt && nt) return `${bt} ${nt}`.replace(/\s+/g, ' ').trim();
+          const bt = (
+            brand.getAttribute("title") ||
+            brand.textContent ||
+            ""
+          ).trim();
+          const nt = (
+            bare.getAttribute("title") ||
+            bare.textContent ||
+            ""
+          ).trim();
+          if (bt && nt) return `${bt} ${nt}`.replace(/\s+/g, " ").trim();
         }
-        const titled = box.querySelector<HTMLAnchorElement>('a[title]');
+        const titled = box.querySelector<HTMLAnchorElement>("a[title]");
         if (titled?.title) return titled.title.trim();
         return null;
       }
 
       function cartLineRoots(): HTMLElement[] {
         const horiz = Array.from(
-          document.querySelectorAll<HTMLElement>('article.horizontal-product-box__wrapper'),
+          document.querySelectorAll<HTMLElement>(
+            "article.horizontal-product-box__wrapper",
+          ),
         ).filter(
-          (el) => el.offsetParent !== null && el.querySelector('.horizontal-product-box__delete-button'),
+          (el) =>
+            el.offsetParent !== null &&
+            el.querySelector(".horizontal-product-box__delete-button"),
         );
         if (horiz.length > 0) return horiz;
-        return Array.from(document.querySelectorAll<HTMLElement>('.product-box_holder')).filter(
-          (el) => el.offsetParent !== null && el.querySelector('.horizontal-product-box__delete-button'),
+        return Array.from(
+          document.querySelectorAll<HTMLElement>(".product-box_holder"),
+        ).filter(
+          (el) =>
+            el.offsetParent !== null &&
+            el.querySelector(".horizontal-product-box__delete-button"),
         );
       }
 
@@ -147,7 +197,11 @@ export async function removeItemFromCart(productName: string): Promise<string> {
       for (const box of cartLineRoots()) {
         const name = cartLineDisplayName(box);
         if (name && name.toLowerCase().includes(t)) {
-          box.querySelector<HTMLElement>('.horizontal-product-box__delete-button')?.click();
+          box
+            .querySelector<HTMLElement>(
+              ".horizontal-product-box__delete-button",
+            )
+            ?.click();
           return name;
         }
       }
@@ -170,52 +224,79 @@ export async function viewCart(): Promise<string> {
   const context = await getContext();
   await ensureLoggedIn(page, context);
 
-  await page.goto('https://www.frisco.pl/stn,cart', { waitUntil: 'domcontentloaded' });
+  await page.goto("https://www.frisco.pl/stn,cart", {
+    waitUntil: "domcontentloaded",
+  });
   await page.waitForTimeout(2_000);
 
   try {
     const result = (await page.evaluate(() => {
       function cartLineDisplayName(box: HTMLElement): string | null {
-        const tImg = box.querySelector<HTMLImageElement>('.horizontal-product-box__product-img img[title]');
-        if (tImg?.title) return tImg.title.replace(/\s+/g, ' ').trim();
-        const aImg = box.querySelector<HTMLImageElement>('.horizontal-product-box__product-img img[alt]');
-        if (aImg?.alt) return aImg.alt.replace(/\s+/g, ' ').trim();
-        const brand = box.querySelector<HTMLElement>('.f-hpc__brand');
-        const bare = box.querySelector<HTMLElement>('.f-hpc__bare-name');
+        const tImg = box.querySelector<HTMLImageElement>(
+          ".horizontal-product-box__product-img img[title]",
+        );
+        if (tImg?.title) return tImg.title.replace(/\s+/g, " ").trim();
+        const aImg = box.querySelector<HTMLImageElement>(
+          ".horizontal-product-box__product-img img[alt]",
+        );
+        if (aImg?.alt) return aImg.alt.replace(/\s+/g, " ").trim();
+        const brand = box.querySelector<HTMLElement>(".f-hpc__brand");
+        const bare = box.querySelector<HTMLElement>(".f-hpc__bare-name");
         if (brand && bare) {
-          const bt = (brand.getAttribute('title') || brand.textContent || '').trim();
-          const nt = (bare.getAttribute('title') || bare.textContent || '').trim();
-          if (bt && nt) return `${bt} ${nt}`.replace(/\s+/g, ' ').trim();
+          const bt = (
+            brand.getAttribute("title") ||
+            brand.textContent ||
+            ""
+          ).trim();
+          const nt = (
+            bare.getAttribute("title") ||
+            bare.textContent ||
+            ""
+          ).trim();
+          if (bt && nt) return `${bt} ${nt}`.replace(/\s+/g, " ").trim();
         }
-        const titled = box.querySelector<HTMLAnchorElement>('a[title]');
+        const titled = box.querySelector<HTMLAnchorElement>("a[title]");
         if (titled?.title) return titled.title.trim();
         return null;
       }
 
       function cartLineRoots(): HTMLElement[] {
         const horiz = Array.from(
-          document.querySelectorAll<HTMLElement>('article.horizontal-product-box__wrapper'),
+          document.querySelectorAll<HTMLElement>(
+            "article.horizontal-product-box__wrapper",
+          ),
         ).filter(
-          (el) => el.offsetParent !== null && el.querySelector('.horizontal-product-box__delete-button'),
+          (el) =>
+            el.offsetParent !== null &&
+            el.querySelector(".horizontal-product-box__delete-button"),
         );
         if (horiz.length > 0) return horiz;
-        return Array.from(document.querySelectorAll<HTMLElement>('.product-box_holder')).filter(
-          (el) => el.offsetParent !== null && el.querySelector('.horizontal-product-box__delete-button'),
+        return Array.from(
+          document.querySelectorAll<HTMLElement>(".product-box_holder"),
+        ).filter(
+          (el) =>
+            el.offsetParent !== null &&
+            el.querySelector(".horizontal-product-box__delete-button"),
         );
       }
 
-      const byName = new Map<string, { name: string; price: string; qty: string }>();
+      const byName = new Map<
+        string,
+        { name: string; price: string; qty: string }
+      >();
       for (const box of cartLineRoots()) {
         const name = cartLineDisplayName(box);
         if (!name) continue;
         const qtyEl = box.querySelector<HTMLInputElement>(
           'input.cart-button_quantity, input[type="number"], [class*="stepper"], input[class*="Quantity"], input[class*="quantity"]',
         );
-        const qty = qtyEl ? (qtyEl.value || '1').trim() : '1';
+        const qty = qtyEl ? (qtyEl.value || "1").trim() : "1";
         const priceEl = box.querySelector<HTMLElement>(
           '.horizontal-product-box__cart-price-value, .horizontal-product-box__cart-price .price, [class*="price"], [class*="Price"]',
         );
-        const price = priceEl ? priceEl.innerText.trim().replace(/\s+/g, ' ') : '';
+        const price = priceEl
+          ? priceEl.innerText.trim().replace(/\s+/g, " ")
+          : "";
         const prev = byName.get(name);
         if (!prev || (!prev.price && price)) {
           byName.set(name, { name, price, qty });
@@ -224,7 +305,7 @@ export async function viewCart(): Promise<string> {
 
       const items = Array.from(byName.values());
       const totalRow = document.querySelector<HTMLElement>(
-        '.generic-summary-box_frame-section-row.final.cta .generic-summary-box_frame-section-row-value',
+        ".generic-summary-box_frame-section-row.final.cta .generic-summary-box_frame-section-row-value",
       );
       const totalEl =
         totalRow ??
@@ -232,22 +313,27 @@ export async function viewCart(): Promise<string> {
           '[class*="summary"] [class*="price"], [class*="checkout"] [class*="total"], ' +
             '[class*="Summary"] [class*="Price"], [class*="CartSummary"]',
         );
-      const total = totalEl ? totalEl.innerText.trim().replace(/\s+/g, ' ') : null;
+      const total = totalEl
+        ? totalEl.innerText.trim().replace(/\s+/g, " ")
+        : null;
       return { items, total };
-    })) as { items: { name: string; price: string; qty: string }[]; total: string | null };
+    })) as {
+      items: { name: string; price: string; qty: string }[];
+      total: string | null;
+    };
 
     if (!result.items.length) {
-      return '🛒 Cart is empty (or contents could not be read).\n👉 https://www.frisco.pl/stn,cart';
+      return "🛒 Cart is empty (or contents could not be read).\n👉 https://www.frisco.pl/stn,cart";
     }
 
-    const lines = ['🛒 Cart contents:\n'];
+    const lines = ["🛒 Cart contents:\n"];
     for (const it of result.items) {
-      const pricePart = it.price ? ` — ${it.price}` : '';
+      const pricePart = it.price ? ` — ${it.price}` : "";
       lines.push(`- ${it.name} ×${it.qty}${pricePart}`);
     }
     if (result.total) lines.push(`\n💰 Total: ${result.total}`);
-    lines.push('\n👉 https://www.frisco.pl/stn,cart');
-    return lines.join('\n');
+    lines.push("\n👉 https://www.frisco.pl/stn,cart");
+    return lines.join("\n");
   } catch (err) {
     return `❌ Failed to read cart: ${err instanceof Error ? err.message : String(err)}`;
   }
@@ -258,7 +344,9 @@ export async function checkCartIssues(): Promise<string> {
   const context = await getContext();
   await ensureLoggedIn(page, context);
 
-  await page.goto('https://www.frisco.pl/stn,cart', { waitUntil: 'domcontentloaded' });
+  await page.goto("https://www.frisco.pl/stn,cart", {
+    waitUntil: "domcontentloaded",
+  });
   await page.waitForTimeout(2_000);
 
   try {
@@ -275,7 +363,9 @@ export async function viewPromotions(): Promise<string> {
   const context = await getContext();
   await ensureLoggedIn(page, context);
 
-  await page.goto('https://www.frisco.pl/stn,cart', { waitUntil: 'domcontentloaded' });
+  await page.goto("https://www.frisco.pl/stn,cart", {
+    waitUntil: "domcontentloaded",
+  });
   await page.waitForTimeout(2_000);
 
   try {
@@ -287,12 +377,17 @@ export async function viewPromotions(): Promise<string> {
   }
 }
 
-export async function updateItemQuantity(productName: string, quantity: number): Promise<string> {
+export async function updateItemQuantity(
+  productName: string,
+  quantity: number,
+): Promise<string> {
   const page = await getPage();
   const context = await getContext();
   await ensureLoggedIn(page, context);
 
-  await page.goto('https://www.frisco.pl/stn,cart', { waitUntil: 'domcontentloaded' });
+  await page.goto("https://www.frisco.pl/stn,cart", {
+    waitUntil: "domcontentloaded",
+  });
   await page.waitForTimeout(2_000);
 
   const needle = productName.toLowerCase();
@@ -300,12 +395,14 @@ export async function updateItemQuantity(productName: string, quantity: number):
   try {
     const found = await page.evaluate((target: string) => {
       const boxes = Array.from(
-        document.querySelectorAll<HTMLElement>('.mini-product-box_wrapper.in-cart'),
+        document.querySelectorAll<HTMLElement>(
+          ".mini-product-box_wrapper.in-cart",
+        ),
       );
 
       for (const box of boxes) {
-        const nameEl = box.querySelector<HTMLAnchorElement>('a[title]');
-        const name = nameEl?.title?.toLowerCase() ?? '';
+        const nameEl = box.querySelector<HTMLAnchorElement>("a[title]");
+        const name = nameEl?.title?.toLowerCase() ?? "";
         if (name.includes(target)) {
           return nameEl?.title ?? target;
         }
@@ -317,14 +414,18 @@ export async function updateItemQuantity(productName: string, quantity: number):
       return `⚠️ Produkt "${productName}" nie znaleziony w koszyku.`;
     }
 
-    const qtyInput = page.locator(`.mini-product-box_wrapper.in-cart:has(a[title*="${found}" i]) .cart-button_quantity`).first();
+    const qtyInput = page
+      .locator(
+        `.mini-product-box_wrapper.in-cart:has(a[title*="${found}" i]) .cart-button_quantity`,
+      )
+      .first();
 
     if (!(await qtyInput.isVisible({ timeout: 3_000 }).catch(() => false))) {
       return `⚠️ Nie można zmienić ilości "${found}" — nie znaleziono pola ilości.`;
     }
 
     await qtyInput.fill(String(quantity));
-    await qtyInput.press('Enter');
+    await qtyInput.press("Enter");
     await page.waitForTimeout(1_500);
 
     return `✅ Zmieniono ilość "${found}" na ${quantity}.\n👉 https://www.frisco.pl/stn,cart`;

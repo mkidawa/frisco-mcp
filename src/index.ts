@@ -3,8 +3,20 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 
 import { login, finishSession, clearSession } from "./tools/session.js";
-import { addItemsToCart, viewCart, removeItemFromCart, checkCartIssues, viewPromotions, updateItemQuantity } from "./tools/cart.js";
-import { searchProducts, getProductInfo, getProductReviews } from "./tools/products.js";
+import {
+  addItemsToCart,
+  clearCart,
+  viewCart,
+  removeItemFromCart,
+  checkCartIssues,
+  viewPromotions,
+  updateItemQuantity,
+} from "./tools/cart.js";
+import {
+  searchProducts,
+  getProductInfo,
+  getProductReviews,
+} from "./tools/products.js";
 import {
   initLogger,
   logEvent,
@@ -83,8 +95,7 @@ server.registerTool(
 server.registerTool(
   "tail_logs",
   {
-    description:
-      "Returns the most recent events from persisted session logs.",
+    description: "Returns the most recent events from persisted session logs.",
     inputSchema: {
       sessionId: z
         .string()
@@ -142,6 +153,17 @@ server.registerTool(
   },
   async () => {
     return executeTool("view_cart", {}, () => viewCart());
+  },
+);
+
+server.registerTool(
+  "clear_cart",
+  {
+    description:
+      "Empties the Frisco cart using the site’s “clear cart” button and confirmation dialog. Run view_cart if you need to verify.",
+  },
+  async () => {
+    return executeTool("clear_cart", {}, () => clearCart());
   },
 );
 
@@ -223,7 +245,6 @@ server.registerTool(
   },
 );
 
-
 server.registerTool(
   "check_cart_issues",
   {
@@ -272,12 +293,8 @@ server.registerTool(
     description:
       "Changes the quantity of a product already in the cart (partial name match supported).",
     inputSchema: {
-      productName: z
-        .string()
-        .describe("Full or partial name of the product"),
-      quantity: z
-        .number()
-        .describe("New quantity to set"),
+      productName: z.string().describe("Full or partial name of the product"),
+      quantity: z.number().describe("New quantity to set"),
     },
   },
   async ({ productName, quantity }) => {
