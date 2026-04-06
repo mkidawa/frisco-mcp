@@ -48,22 +48,113 @@ async function clearCartViaUi(
 ): Promise<boolean> {
   await openCartPage(page);
 
-  const clearButton = page
-    .locator(
-      ".checkout_products-actions-clear-cart, .cart-side-box_actions_clear-cart",
-    )
-    .first();
+  const clearButtonCandidates = [
+    page.locator(".checkout_products-actions-clear-cart").first(),
+    page.locator(".cart-side-box_actions_clear-cart").first(),
+    page.getByRole("link", { name: /wyczyść koszyk/i }).first(),
+    page.getByRole("button", { name: /wyczyść koszyk/i }).first(),
+    page
+      .locator("a,button")
+      .filter({ hasText: /wyczyść koszyk/i })
+      .first(),
+  ];
 
-  if (!(await clearButton.isVisible({ timeout: 3_000 }).catch(() => false))) {
-    return false;
+  let clickedClearButton = false;
+  for (const candidate of clearButtonCandidates) {
+    const visible = await candidate
+      .isVisible({ timeout: 1_000 })
+      .catch(() => false);
+    if (!visible) continue;
+
+    try {
+      await candidate.scrollIntoViewIfNeeded();
+      await candidate.click({ timeout: 2_000 });
+      clickedClearButton = true;
+      break;
+    } catch {
+      try {
+        await candidate.click({ timeout: 2_000, force: true });
+        clickedClearButton = true;
+        break;
+      } catch {
+        // Try the next selector variant.
+      }
+    }
   }
 
-  await clearButton.click();
-  const confirmButton = page.locator(".notification-popup_buttons .button.cta");
-  await confirmButton.waitFor({ state: "visible", timeout: 5_000 });
-  await confirmButton.click();
-  await page.waitForTimeout(CART_READY_WAIT_MS);
-  return true;
+  if (!clickedClearButton) return false;
+
+  // Fallback: force a DOM click for non-standard anchor/button implementations.
+  if (!clickedClearButton) {
+    clickedClearButton = await page.evaluate(() => {
+      const candidates = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          ".checkout_products-actions-clear-cart, .cart-side-box_actions_clear-cart, a, button",
+        ),
+      );
+      const trigger = candidates.find((element) => {
+        const className = (element.className || "").toString();
+        const text = (element.textContent || "").replace(/\s+/g, " ").trim();
+        return (
+          className.includes("checkout_products-actions-clear-cart") ||
+          className.includes("cart-side-box_actions_clear-cart") ||
+          /wyczyść koszyk/i.test(text)
+        );
+      });
+      if (!trigger) return false;
+      trigger.click();
+      return true;
+    });
+  }
+
+  if (!clickedClearButton) return false;
+
+  const confirmCandidates = [
+    page
+      .locator(".notification-popup_buttons a.button.cta")
+      .filter({ hasText: /wyczyść koszyk/i })
+      .first(),
+    page.getByRole("button", { name: /wyczyść koszyk/i }).first(),
+    page.getByRole("link", { name: /wyczyść koszyk/i }).first(),
+    page.locator(".notification-popup_buttons .button.cta").first(),
+  ];
+
+  for (const confirm of confirmCandidates) {
+    const visible = await confirm
+      .isVisible({ timeout: 2_500 })
+      .catch(() => false);
+    if (!visible) continue;
+    try {
+      await confirm.click({ timeout: 2_000 });
+      await page.waitForTimeout(CART_READY_WAIT_MS);
+      return true;
+    } catch {
+      // Try next confirm button candidate.
+    }
+  }
+
+  // Last-chance fallback for popup implemented outside standard roles.
+  const confirmedViaDom = await page.evaluate(() => {
+    const popupButtons = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        ".notification-popup_buttons a.button.cta, .notification-popup_buttons .button.cta",
+      ),
+    );
+    const confirm = popupButtons.find((element) =>
+      /wyczyść koszyk/i.test(
+        (element.textContent || "").replace(/\s+/g, " ").trim(),
+      ),
+    );
+    if (!confirm) return false;
+    confirm.click();
+    return true;
+  });
+  if (confirmedViaDom) {
+    await page.waitForTimeout(CART_READY_WAIT_MS);
+    return true;
+  }
+
+  return false;
 }
 
 async function getCartSnapshot(
@@ -201,9 +292,11 @@ export async function clearCart(): Promise<string> {
       ].join("\n");
     }
 
-    return ["🛒 Clear-cart action was triggered in Frisco UI.", "", summary].join(
-      "\n",
-    );
+    return [
+      "🛒 Clear-cart action was triggered in Frisco UI.",
+      "",
+      summary,
+    ].join("\n");
   } catch (error) {
     return `❌ Failed to clear cart: ${getErrorMessage(error)}`;
   }
@@ -241,8 +334,14 @@ export async function addItemsToCart(
     const quantity = item.quantity ?? 1;
 
     try {
-      const { foundName, addButton, unavailable, alternatives } =
-        await searchNavigateAndCache(page, query);
+      const {
+        foundName,
+        foundPrice,
+        foundWeight,
+        addButton,
+        unavailable,
+        alternatives,
+      } = await searchNavigateAndCache(page, query);
 
       if (!addButton) {
         if (unavailable) {
@@ -253,7 +352,9 @@ export async function addItemsToCart(
               const weightPart = alternative.weight
                 ? ` [${alternative.weight}]`
                 : "";
-              const pricePart = alternative.price ? ` | ${alternative.price}` : "";
+              const pricePart = alternative.price
+                ? ` | ${alternative.price}`
+                : "";
               message += `\n   - ${alternative.name}${weightPart}${pricePart}`;
             }
           }
@@ -268,7 +369,9 @@ export async function addItemsToCart(
         await addButton.click();
         await page.waitForTimeout(ITEM_ADD_WAIT_MS);
       }
-      results.push(`✅ ${foundName} ×${quantity}`);
+      const weightPart = foundWeight ? ` [${foundWeight}]` : "";
+      const pricePart = foundPrice ? ` — ${foundPrice}` : "";
+      results.push(`✅ ${foundName}${weightPart} ×${quantity}${pricePart}`);
     } catch (error) {
       const message = getErrorMessage(error).slice(0, 120);
       results.push(`❌ ${displayName}: ${message}`);
@@ -417,7 +520,7 @@ export async function updateItemQuantity(
   quantity: number,
 ): Promise<string> {
   if (!Number.isFinite(quantity) || quantity < 1) {
-    return '❌ Quantity must be a positive number (e.g. 1, 2, 3).';
+    return "❌ Quantity must be a positive number (e.g. 1, 2, 3).";
   }
 
   const needle = productName.toLowerCase();
@@ -426,7 +529,9 @@ export async function updateItemQuantity(
     const page = await getReadyCartPage();
     const foundName = await page.evaluate((target: string) => {
       const boxes = Array.from(
-        document.querySelectorAll<HTMLElement>(".mini-product-box_wrapper.in-cart"),
+        document.querySelectorAll<HTMLElement>(
+          ".mini-product-box_wrapper.in-cart",
+        ),
       );
 
       for (const box of boxes) {
@@ -449,7 +554,9 @@ export async function updateItemQuantity(
       )
       .first();
 
-    if (!(await quantityInput.isVisible({ timeout: 3_000 }).catch(() => false))) {
+    if (
+      !(await quantityInput.isVisible({ timeout: 3_000 }).catch(() => false))
+    ) {
       return `⚠️ Cannot change quantity for "${foundName}" — quantity input was not found.`;
     }
 

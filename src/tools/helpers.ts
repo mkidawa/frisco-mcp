@@ -143,6 +143,8 @@ export function extractProductPageInfoFromHtml(html: string): ProductPageInfo {
 
 export interface SearchNavigateResult {
   foundName: string;
+  foundPrice?: string;
+  foundWeight?: string;
   addButton: import('playwright').Locator | null;
   unavailable?: boolean;
   alternatives?: Array<{ name: string; price: string; weight: string }>;
@@ -206,7 +208,9 @@ export async function searchNavigateAndCache(
     });
   }) as Array<{ name: string; href: string | null; price: string; weight: string; unavailable: boolean }>;
 
-  if (!searchPageInfo.length) return { foundName: query, addButton: null };
+  if (!searchPageInfo.length) {
+    return { foundName: query, addButton: null };
+  }
 
   const first = searchPageInfo[0];
 
@@ -218,6 +222,8 @@ export async function searchNavigateAndCache(
 
     return {
       foundName: first.name,
+      foundPrice: first.price,
+      foundWeight: first.weight || undefined,
       addButton: null,
       unavailable: true,
       alternatives,
@@ -225,7 +231,14 @@ export async function searchNavigateAndCache(
   }
 
   const productUrl = first.href;
-  if (!productUrl) return { foundName: query, addButton: null };
+  if (!productUrl) {
+    return {
+      foundName: query,
+      foundPrice: first.price,
+      foundWeight: first.weight || undefined,
+      addButton: null,
+    };
+  }
 
   const fullUrl = productUrl.startsWith('http')
     ? productUrl
@@ -247,10 +260,14 @@ export async function searchNavigateAndCache(
   await page.waitForTimeout(1_000);
 
   let foundName = query;
+  let foundPrice = first.price;
+  let foundWeight = first.weight || undefined;
   try {
     const html = await page.content();
     const info = extractProductPageInfoFromHtml(html);
     foundName = info.name || query;
+    if (info.price) foundPrice = info.price;
+    if (info.weight) foundWeight = info.weight;
     const entry: Product = {
       name: foundName,
       url: fullUrl,
@@ -268,11 +285,11 @@ export async function searchNavigateAndCache(
   for (let i = 0; i < count; i++) {
     const btn = doKoszykaButtons.nth(i);
     if (await btn.isVisible()) {
-      return { foundName, addButton: btn };
+      return { foundName, foundPrice, foundWeight, addButton: btn };
     }
   }
 
-  return { foundName, addButton: null };
+  return { foundName, foundPrice, foundWeight, addButton: null };
 }
 
 export function extractCartIssuesFromHtml(html: string): CartIssue[] {
