@@ -244,7 +244,31 @@ export async function searchNavigateAndCache(
     ? productUrl
     : 'https://www.frisco.pl' + productUrl;
 
-  await page.goto(fullUrl, { waitUntil: 'domcontentloaded' });
+  const productLinkCandidates = [
+    page.locator(`#products-list .product-box_holder a[href="${productUrl}"][title]`).first(),
+    page.locator(`#products-list .product-box_holder a[href*="/pid,"][title="${first.name}"]`).first(),
+    page.locator('#products-list .product-box_holder a[href*="/pid,"][title]').first(),
+  ];
+
+  let openedViaResultClick = false;
+  for (const link of productLinkCandidates) {
+    const visible = await link.isVisible({ timeout: 1_000 }).catch(() => false);
+    if (!visible) continue;
+    try {
+      await Promise.all([
+        page.waitForLoadState('domcontentloaded'),
+        link.click({ timeout: 2_000 }),
+      ]);
+      openedViaResultClick = true;
+      break;
+    } catch {
+      // Try next link variant.
+    }
+  }
+
+  if (!openedViaResultClick) {
+    await page.goto(fullUrl, { waitUntil: 'domcontentloaded' });
+  }
   await page.waitForTimeout(2_000);
 
   for (const label of ['Wartości odżywcze', 'Skład i alergeny']) {

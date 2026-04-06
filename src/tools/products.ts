@@ -35,6 +35,8 @@ export async function searchProducts(query: string, topN: number = 5): Promise<s
       return boxes.map(box => {
         const nameEl = box.querySelector<HTMLAnchorElement>('a[title]');
         const name = nameEl ? nameEl.title : '?';
+        const productLink = box.querySelector<HTMLAnchorElement>('a[href*="/pid,"][title]');
+        const href = productLink ? productLink.getAttribute('href') || productLink.href : null;
         const priceEl = box.querySelector<HTMLElement>('[class*="price"], [class*="Price"]');
         const price = priceEl ? priceEl.innerText.trim().replace(/\\s+/g, ' ') : '';
 
@@ -56,15 +58,34 @@ export async function searchProducts(query: string, topN: number = 5): Promise<s
         const unavailable = !!box.querySelector('.unavailable-info') ||
           !!box.querySelector('article.unavailable');
 
-        return { name, price, weight, available: !unavailable };
+        return { name, href, price, weight, available: !unavailable };
       });
-    }, topN)) as { name: string; price: string; weight: string; available: boolean }[];
+    }, topN)) as Array<{
+      name: string;
+      href: string | null;
+      price: string;
+      weight: string;
+      available: boolean;
+    }>;
 
     if (!products.length) return `❌ No products found for: "${query}"`;
 
     const lines = [`🔍 Search results for "${query}":\n`];
     for (let i = 0; i < products.length; i++) {
       const p = products[i];
+      const href = p.href;
+      if (p.available && typeof href === 'string') {
+        const fullUrl = href.startsWith('http') ? href : `https://www.frisco.pl${href}`;
+        const cachedProduct: Product = {
+          name: p.name,
+          url: fullUrl,
+          price: p.price || '',
+          weight: p.weight || null,
+          macros: {},
+          ingredients: null,
+        };
+        productCache.set(p.name, cachedProduct);
+      }
       const weightPart = p.weight ? ` [${p.weight}]` : '';
       const pricePart = p.price ? ` | ${p.price}` : '';
       const availPart = p.available ? '' : ' ⚠️ NIEDOSTĘPNY';

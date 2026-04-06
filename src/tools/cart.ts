@@ -1,4 +1,4 @@
-import { getPage, getContext } from "../browser.js";
+import { getPage, getContext, productCache } from "../browser.js";
 import { ensureLoggedIn } from "../auth.js";
 import {
   searchNavigateAndCache,
@@ -24,6 +24,89 @@ type CartSnapshot = {
   items: CartSummaryItem[];
   total: string | null;
 };
+
+function normalizeLookup(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function findCachedProduct(...candidates: Array<string | undefined>): {
+  name: string;
+  url: string;
+  price?: string | null;
+  weight?: string | null;
+} | null {
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const direct = productCache.get(candidate);
+    if (direct?.url) return direct;
+  }
+
+  const normalizedCandidates = candidates
+    .filter((value): value is string => Boolean(value))
+    .map(normalizeLookup);
+
+  if (normalizedCandidates.length === 0) return null;
+
+  for (const entry of productCache.values()) {
+    if (!entry.url) continue;
+    const normalizedName = normalizeLookup(entry.name);
+    if (normalizedCandidates.some((candidate) => candidate === normalizedName)) {
+      return entry;
+    }
+  }
+
+  return null;
+}
+
+async function findVisibleAddButton(
+  page: import("playwright").Page,
+): Promise<import("playwright").Locator | null> {
+  const buttonCandidates = [
+    page.locator(".new-product-page__actions .cart-button_add").first(),
+    page.locator(".new-product-page .cart-button_add").first(),
+    page.getByRole("button", { name: /do koszyka/i }).first(),
+    page.getByText("Do koszyka", { exact: true }).first(),
+    page.locator(".cart-button_add").first(),
+  ];
+
+  for (const candidate of buttonCandidates) {
+    const visible = await candidate
+      .isVisible({ timeout: 1_000 })
+      .catch(() => false);
+    if (visible) return candidate;
+  }
+
+  return null;
+}
+
+async function resolveFromCachedProduct(
+  page: import("playwright").Page,
+  cached: { name: string; url: string; price?: string | null; weight?: string | null },
+): Promise<{
+  foundName: string;
+  foundPrice?: string;
+  foundWeight?: string;
+  addButton: import("playwright").Locator | null;
+  unavailable?: boolean;
+  alternatives?: Array<{ name: string; price: string; weight: string }>;
+}> {
+  await page.goto(cached.url, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1_500);
+  await dismissPopups(page);
+
+  const addButton = await findVisibleAddButton(page);
+  return {
+    foundName: cached.name,
+    foundPrice: cached.price || undefined,
+    foundWeight: cached.weight || undefined,
+    addButton,
+  };
+}
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -334,14 +417,28 @@ export async function addItemsToCart(
     const quantity = item.quantity ?? 1;
 
     try {
-      const {
+      const cachedProduct = findCachedProduct(displayName, query);
+      let {
         foundName,
         foundPrice,
         foundWeight,
         addButton,
         unavailable,
         alternatives,
-      } = await searchNavigateAndCache(page, query);
+      } = cachedProduct
+        ? await resolveFromCachedProduct(page, cachedProduct)
+        : await searchNavigateAndCache(page, query);
+
+      if (!addButton && cachedProduct) {
+        ({
+          foundName,
+          foundPrice,
+          foundWeight,
+          addButton,
+          unavailable,
+          alternatives,
+        } = await searchNavigateAndCache(page, query));
+      }
 
       if (!addButton) {
         if (unavailable) {
