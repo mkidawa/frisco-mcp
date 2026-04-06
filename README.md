@@ -25,13 +25,17 @@ A TypeScript **Model Context Protocol (MCP)** server that lets AI assistants (Cl
 | `add_items_to_cart`     | Accepts a JSON list of products (name, search query, quantity). Searches for each item and clicks "Add to cart". Optionally clears the cart first. |
 | `view_cart`             | Returns the current cart contents and total price.                                                                                                 |
 | `remove_item_from_cart` | Removes a specific product from the cart by name (partial match).                                                                                  |
+| `update_item_quantity`  | Changes the quantity of a product already in the cart (partial name match).                                                                         |
+| `check_cart_issues`     | Detects sold-out or unavailable products in the cart and lists available substitutes for each.                                                      |
+| `view_promotions`       | Shows active promotions, discounts, and total savings in the current cart.                                                                          |
 
 ### Products
 
-| Tool               | Description                                                                                                   |
-| ------------------ | ------------------------------------------------------------------------------------------------------------- |
-| `search_products`  | Searches frisco.pl and returns top N results with prices.                                                     |
-| `get_product_info` | Returns detailed product info: nutritional values (macros per 100g), weight/grammage, ingredients, and price. |
+| Tool                   | Description                                                                                                   |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `search_products`      | Searches frisco.pl and returns top N results with prices and availability status.                              |
+| `get_product_info`     | Returns detailed product info: nutritional values (macros per 100g), weight/grammage, ingredients, and price.  |
+| `get_product_reviews`  | Returns customer reviews and ratings (from Trustmate) for a product.                                           |
 
 ### Logs
 
@@ -155,15 +159,31 @@ The `login` tool opens a Chromium window at `frisco.pl/login`. Log in manually �
 
 > _"Add 2 liters of milk and wheat bread to cart"_
 
-The `add_items_to_cart` tool searches for each product, picks the first match, and clicks "Add to cart" the requested number of times.
+The `add_items_to_cart` tool searches for each product, picks the first match, and clicks "Add to cart" the requested number of times. If a product is temporarily unavailable, it reports the issue and lists available alternatives.
 
 > _"Find me natural yogurt"_
 
-The `search_products` tool returns a list of matching products with prices.
+The `search_products` tool returns a list of matching products with prices. Unavailable products are marked with ⚠️ NIEDOSTĘPNY.
 
 > _"Remove the butter from my cart"_
 
 The `remove_item_from_cart` tool finds a product in the cart by name and removes it.
+
+> _"Change the milk quantity to 3"_
+
+The `update_item_quantity` tool finds the product in the cart and updates its quantity.
+
+> _"Are there any issues with my cart?"_
+
+The `check_cart_issues` tool scans the cart for sold-out products and shows available substitutes for each.
+
+> _"What reviews does Skyr Piątnica have?"_
+
+The `get_product_reviews` tool fetches customer ratings and reviews from Trustmate.
+
+> _"Show me active promotions in my cart"_
+
+The `view_promotions` tool lists all active promotions, discount badges, and total savings.
 
 ### 3. Checkout
 
@@ -185,9 +205,10 @@ frisco-mcp/
 │   ├── types.ts          # Shared TypeScript types
 │   └── tools/
 │       ├── session.ts    # login, finish_session, clear_session
-│       ├── cart.ts       # add_items_to_cart, view_cart, remove_item_from_cart
-│       ├── products.ts   # search_products, get_product_info
-│       └── helpers.ts    # Navigation, popup dismissal, DOM parsing
+│       ├── cart.ts       # add_items_to_cart, view_cart, remove_item_from_cart,
+│       │                 #   update_item_quantity, check_cart_issues, view_promotions
+│       ├── products.ts   # search_products, get_product_info, get_product_reviews
+│       └── helpers.ts    # Navigation, popup dismissal, DOM parsing, formatters
 │   └── __tests__/        # Unit tests (Vitest)
 ├── test_data/            # Sample HTML fixtures for tests
 ├── docs/
