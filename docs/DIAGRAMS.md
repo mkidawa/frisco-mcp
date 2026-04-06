@@ -65,12 +65,16 @@ flowchart TD
     E --> F[clearCart]
     F --> G{For each product}
 
-    G --> H[searchNavigateAndCache(query)]
-    H --> I{Found 'Add to cart'<br/>button?}
+    G --> H["searchNavigateAndCache(query)"]
+    H --> U{First result<br/>unavailable?}
+    U -- Yes --> V["Collect available alternatives"]
+    V --> W["Report unavailable + alternatives"]
+    U -- No --> I{Found 'Do koszyka'<br/>button?}
     I -- No --> J[Add warning result]
-    I -- Yes --> K[Click 'Add to cart' x quantity]
+    I -- Yes --> K["Click 'Do koszyka' x quantity"]
     K --> L[Add success result]
-    J --> M{Next product?}
+    W --> M{Next product?}
+    J --> M
     L --> M
     M -- Yes --> G
     M -- No --> N[Return summary]
