@@ -54,6 +54,7 @@ function isSameSearchUrl(currentUrl: string, expectedUrl: string): boolean {
 type SearchPageResult = {
   name: string;
   url: string | null;
+  productPid: string | null;
   price: string;
   weight: string;
   available: boolean;
@@ -102,6 +103,8 @@ async function readVisibleSearchResultsFromPage(
           ? href
           : `https://www.frisco.pl${href}`
         : null;
+      const productPidMatch = (url || "").match(/\/pid,([^/?#]+)/i);
+      const productPid = productPidMatch?.[1] ?? null;
       const priceEl = box.querySelector<HTMLElement>(
         '[class*="price"], [class*="Price"]',
       );
@@ -135,6 +138,7 @@ async function readVisibleSearchResultsFromPage(
       return {
         name,
         url,
+        productPid,
         price,
         weight,
         available: !unavailable,
@@ -143,6 +147,64 @@ async function readVisibleSearchResultsFromPage(
       };
     });
   })) as SearchPageResult[];
+}
+
+function isSameSearchResult(
+  left: SearchPageResult,
+  right: SearchPageResult,
+): boolean {
+  if (left.productPid && right.productPid) {
+    return left.productPid === right.productPid;
+  }
+  if (left.url && right.url) {
+    return normalizeFriscoUrl(left.url) === normalizeFriscoUrl(right.url);
+  }
+  return normalizeLookup(left.name) === normalizeLookup(right.name);
+}
+
+async function resolveAddButtonForResult(
+  page: import("playwright").Page,
+  selected: SearchPageResult,
+): Promise<import("playwright").Locator | null> {
+  const candidateButtons: import("playwright").Locator[] = [];
+
+  if (selected.productPid) {
+    candidateButtons.push(
+      page
+        .locator(".product-box_holder")
+        .filter({
+          has: page.locator(`a[href*="/pid,${selected.productPid}"]`),
+        })
+        .first()
+        .locator(".cart-button_add")
+        .first(),
+    );
+  }
+
+  candidateButtons.push(
+    page
+      .getByTitle(selected.name, { exact: true })
+      .first()
+      .locator("xpath=ancestor::*[contains(@class,'product-box_holder')][1]")
+      .locator(".cart-button_add")
+      .first(),
+  );
+
+  candidateButtons.push(
+    page
+      .locator(".product-box_holder")
+      .filter({ hasText: selected.name })
+      .first()
+      .locator(".cart-button_add")
+      .first(),
+  );
+
+  for (const button of candidateButtons) {
+    const visible = await button.isVisible({ timeout: 1_000 }).catch(() => false);
+    if (visible) return button;
+  }
+
+  return null;
 }
 
 async function ensureSearchResultsPage(
@@ -161,6 +223,27 @@ function pickResultForCartItem(
   searchContextResults: SearchResultItem[],
   pageResults: SearchPageResult[],
 ): SearchPageResult | null {
+  const explicitName = item.name?.trim();
+  if (explicitName) {
+    const explicitNeedle = normalizeLookup(explicitName);
+    const exactContext = searchContextResults.find(
+      (result) => normalizeLookup(result.name) === explicitNeedle,
+    );
+    if (exactContext?.url) {
+      const exactContextUrl = normalizeFriscoUrl(exactContext.url);
+      const byExactUrl = pageResults.find(
+        (result) =>
+          result.url && normalizeFriscoUrl(result.url) === exactContextUrl,
+      );
+      if (byExactUrl) return byExactUrl;
+    }
+
+    const byExactName = pageResults.find(
+      (result) => normalizeLookup(result.name) === explicitNeedle,
+    );
+    if (byExactName) return byExactName;
+  }
+
   const candidates = [item.name, item.searchQuery]
     .filter((value): value is string => Boolean(value && value.trim()))
     .map(normalizeLookup);
@@ -537,7 +620,12 @@ export async function addItemsToCart(
 
       if (!selected.available || !selected.hasAddButton) {
         const alternatives = pageResults
-          .filter((result) => result.available && result.hasAddButton && result.domIndex !== selected.domIndex)
+          .filter(
+            (result) =>
+              result.available &&
+              result.hasAddButton &&
+              !isSameSearchResult(result, selected),
+          )
           .slice(0, 5);
         let message = `⚠️ ${displayName}: product "${selected.name}" is currently unavailable`;
         if (alternatives.length > 0) {
@@ -552,13 +640,8 @@ export async function addItemsToCart(
         continue;
       }
 
-      const addButton = page
-        .locator(".product-box_holder")
-        .nth(selected.domIndex)
-        .locator(".cart-button_add")
-        .first();
-      const visible = await addButton.isVisible({ timeout: 1_500 }).catch(() => false);
-      if (!visible) {
+      const addButton = await resolveAddButtonForResult(page, selected);
+      if (!addButton) {
         results.push(`⚠️ ${displayName}: add button not available for "${selected.name}"`);
         continue;
       }
