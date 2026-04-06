@@ -23,6 +23,14 @@ describe('extractProductPageInfoFromHtml', () => {
       expect(info.price).toBe('5,95 zł');
     });
 
+    it('has no original price (not a promotional product)', () => {
+      expect(info.originalPrice).toBeNull();
+    });
+
+    it('extracts unit price', () => {
+      expect(info.unitPrice).toBe('18,03 / l');
+    });
+
     it('extracts weight in ml', () => {
       expect(info.weight).toBe('330 ml');
     });
@@ -72,6 +80,10 @@ describe('extractProductPageInfoFromHtml', () => {
       expect(info.price).toBe('16,29 zł');
     });
 
+    it('extracts unit price', () => {
+      expect(info.unitPrice).toBe('32,58 / kg');
+    });
+
     it('extracts approximate weight', () => {
       expect(info.weight).toBe('500 g');
     });
@@ -96,6 +108,10 @@ describe('extractProductPageInfoFromHtml', () => {
 
     it('extracts price', () => {
       expect(info.price).toBe('6,59 zł');
+    });
+
+    it('extracts unit price', () => {
+      expect(info.unitPrice).toBe('6,59 / kg');
     });
 
     it('extracts approximate weight in kg', () => {
@@ -177,7 +193,7 @@ describe('extractProductPageInfoFromHtml', () => {
     });
   });
 
-  describe('promotion.html — cheese with full nutrition gauges', () => {
+  describe('promotion.html — cheese on promotion with full nutrition gauges', () => {
     const info = loadProduct('promotion.html');
 
     it('extracts product name', () => {
@@ -185,8 +201,16 @@ describe('extractProductPageInfoFromHtml', () => {
       expect(info.name).toContain('GALBANI');
     });
 
-    it('extracts price', () => {
+    it('extracts promotional price', () => {
       expect(info.price).toBe('7,49 zł');
+    });
+
+    it('extracts original (pre-promotion) price', () => {
+      expect(info.originalPrice).toBe('7,99 zł');
+    });
+
+    it('extracts unit price', () => {
+      expect(info.unitPrice).toBe('29,96 / kg');
     });
 
     it('extracts weight in grams', () => {

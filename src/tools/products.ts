@@ -182,6 +182,8 @@ export async function getProductInfo(query: string): Promise<string> {
       name: info.name || query,
       url: fullUrl,
       price: info.price,
+      originalPrice: info.originalPrice,
+      unitPrice: info.unitPrice,
       weight: info.weight,
       macros: info.macros,
       ingredients: info.ingredients,

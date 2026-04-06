@@ -35,6 +35,8 @@ export interface Product {
   name: string;
   url: string;
   price: string;
+  originalPrice?: string | null;
+  unitPrice?: string | null;
   weight?: string | null;
   macros: Macros;
   ingredients?: string | null;
@@ -43,6 +45,8 @@ export interface Product {
 export interface ProductPageInfo {
   name: string;
   price: string;
+  originalPrice?: string | null;
+  unitPrice?: string | null;
   weight: string | null;
   ingredients: string | null;
   macros: Macros;

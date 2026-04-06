@@ -79,8 +79,23 @@ export function extractProductPageInfoFromHtml(html: string): ProductPageInfo {
       : priceMeta;
   }
   if (!price) {
-    const priceUi = $('.f-pdp__price-amount--emphasized').first().text();
+    const priceUi = $('.f-pdp__price-amount--emphasized').first().text()
+      || $('.f-pdp__price-amount--highlighted').first().text();
     if (priceUi) price = `${normalizeWhitespace(priceUi)} zł`;
+  }
+
+  let originalPrice: string | null = null;
+  const oldPriceEl = $('.f-pdp__price-amount--plain').first();
+  if (oldPriceEl.length) {
+    const oldPriceText = normalizeWhitespace(oldPriceEl.text());
+    if (oldPriceText) originalPrice = `${oldPriceText} zł`;
+  }
+
+  let unitPrice: string | null = null;
+  const unitPriceEl = $('div.f-pdp__unit-price').first();
+  if (unitPriceEl.length) {
+    const unitPriceText = normalizeWhitespace(unitPriceEl.text());
+    if (unitPriceText) unitPrice = unitPriceText;
   }
 
   let weight: string | null = null;
@@ -135,7 +150,7 @@ export function extractProductPageInfoFromHtml(html: string): ProductPageInfo {
     }
   }
 
-  return { name, price, weight, ingredients, macros };
+  return { name, price, originalPrice, unitPrice, weight, ingredients, macros };
 }
 
 function extractMacrosFromGauges($: ReturnType<typeof load>): ProductPageInfo['macros'] {
@@ -332,6 +347,8 @@ export async function searchNavigateAndCache(
       name: foundName,
       url: fullUrl,
       price: info.price,
+      originalPrice: info.originalPrice,
+      unitPrice: info.unitPrice,
       weight: info.weight,
       macros: info.macros,
       ingredients: info.ingredients,
@@ -566,7 +583,12 @@ export function formatPromotions(data: { totalSavings: string; promotions: CartP
 export function formatProductInfo(product: Product): string {
   const lines: string[] = [`🛍️ ${product.name}`];
   if (product.url) lines.push(`🔗 URL: ${product.url}`);
-  if (product.price) lines.push(`💰 Price: ${product.price}`);
+  if (product.price && product.originalPrice) {
+    lines.push(`💰 Price: ${product.price} (was ${product.originalPrice})`);
+  } else if (product.price) {
+    lines.push(`💰 Price: ${product.price}`);
+  }
+  if (product.unitPrice) lines.push(`📏 Unit price: ${product.unitPrice}`);
   if (product.weight) lines.push(`📦 Weight: ${product.weight}`);
   lines.push('');
 
