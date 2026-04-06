@@ -20,22 +20,22 @@ A TypeScript **Model Context Protocol (MCP)** server that lets AI assistants (Cl
 
 ### Cart
 
-| Tool                    | Description                                                                                                                                        |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `add_items_to_cart`     | Adds products by selecting from the most recent `search_products` result page (saved search URL/context). No additional search is performed.      |
-| `view_cart`             | Returns the current cart contents and total price.                                                                                                 |
-| `remove_item_from_cart` | Removes a specific product from the cart by name (partial match).                                                                                  |
-| `update_item_quantity`  | Changes the quantity of a product already in the cart (partial name match).                                                                         |
-| `check_cart_issues`     | Detects sold-out or unavailable products in the cart and lists available substitutes for each.                                                      |
-| `view_promotions`       | Shows active promotions, discounts, and total savings in the current cart.                                                                          |
+| Tool                    | Description                                                                                                                                                                                     |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `add_items_to_cart`     | Adds products to cart. Supports two flows: **(1)** via `productUrl` — navigates directly to the product page and clicks "Do koszyka"; **(2)** from the latest `search_products` result page.   |
+| `view_cart`             | Returns the current cart contents and total price.                                                                                                                                               |
+| `remove_item_from_cart` | Removes a specific product from the cart by name (partial match).                                                                                                                                |
+| `update_item_quantity`  | Changes the quantity of a product already in the cart (partial name match).                                                                                                                       |
+| `check_cart_issues`     | Detects sold-out or unavailable products in the cart and lists available substitutes for each.                                                                                                    |
+| `view_promotions`       | Shows active promotions, discounts, and total savings in the current cart.                                                                                                                        |
 
 ### Products
 
-| Tool                   | Description                                                                                                   |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `search_products`      | Searches frisco.pl, returns top N results with prices/availability, and saves search URL/context for cart add. |
-| `get_product_info`     | Returns detailed product info: nutritional values (macros per 100g), weight/grammage, ingredients, and price.  |
-| `get_product_reviews`  | Returns customer reviews and ratings (from Trustmate) for a product.                                           |
+| Tool                   | Description                                                                                                                                                       |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `search_products`      | Searches frisco.pl, returns top N results with prices/availability, and saves search URL/context for cart add.                                                   |
+| `get_product_info`     | Returns detailed product info: nutritional values (macros per 100g), weight/grammage, ingredients, price (including original price and unit price if on promotion). |
+| `get_product_reviews`  | Returns customer reviews and ratings (from Trustmate) for a product.                                                                                               |
 
 ### Logs
 
@@ -64,7 +64,7 @@ flowchart LR
     D --> H
     E --> H
 
-    D --> I[src/tools/helpers.ts<br/>navigation & parsing]
+    D --> I[src/tools/helpers.ts<br/>navigation, HTML parsing & formatters]
     E --> I
 
     H --> J[(~/.frisco-mcp/session.json)]
@@ -162,9 +162,13 @@ The `login` tool opens a Chromium window at `frisco.pl/login`. Log in manually �
 
 The `search_products` tool returns a list of matching products with prices. Unavailable products are marked with ⚠️ NIEDOSTĘPNY. It also saves the current search URL and result context for subsequent cart operations.
 
-> _"Add PIĄTNICA Skyr jogurt pitny typu islandzkiego wanilia to cart"_
+> _"Tell me more about the PIĄTNICA Skyr"_
 
-The `add_items_to_cart` tool selects products from the latest `search_products` results and clicks "Do koszyka" on that result page. It does not re-run product search. If the browser is on a different page, it navigates back to the saved search URL before adding.
+The `get_product_info` tool navigates to the product page and extracts detailed information: nutritional values (kcal, protein, fat, carbohydrates, sugars, salt per 100g), weight/grammage, ingredients, price (including original price and unit price for promotional products), and the product URL.
+
+> _"Add it to cart"_
+
+The `add_items_to_cart` tool supports two flows: **(1)** if a `productUrl` is provided (e.g. from `get_product_info`), it navigates directly to that product page and clicks "Do koszyka" — this is the preferred flow; **(2)** otherwise, it uses the latest `search_products` results page to find and add the product.
 
 > _"Remove the butter from my cart"_
 
@@ -212,6 +216,7 @@ frisco-mcp/
 │       └── helpers.ts    # Navigation, popup dismissal, DOM parsing, formatters
 │   └── __tests__/        # Unit tests (Vitest)
 ├── test_data/            # Sample HTML fixtures for tests
+│   └── products/         #   Product page HTMLs (skyr, chicken, bananas, eggs, bag, promotion)
 ├── docs/
 │   └── DIAGRAMS.md       # Mermaid architecture & flow diagrams
 ├── .github/

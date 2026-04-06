@@ -19,7 +19,7 @@ flowchart LR
     D --> H
     E --> H
 
-    D --> I[src/tools/helpers.ts<br/>navigation & parsing]
+    D --> I[src/tools/helpers.ts<br/>navigation, HTML parsing & formatters]
     E --> I
 
     H --> J[(~/.frisco-mcp/session.json)]
@@ -38,7 +38,7 @@ flowchart LR
 | `search_products` | products.ts | Search products + save search URL/context |
 | `get_product_info` | products.ts | Detailed product info (macros, ingredients) |
 | `get_product_reviews` | products.ts | Customer reviews and ratings (Trustmate) |
-| `add_items_to_cart` | cart.ts | Add products from latest saved search result page |
+| `add_items_to_cart` | cart.ts | Add products via productUrl (preferred) or from search results |
 | `view_cart` | cart.ts | View current cart contents |
 | `remove_item_from_cart` | cart.ts | Remove a product from cart |
 | `update_item_quantity` | cart.ts | Change quantity of a product in cart |
@@ -82,19 +82,76 @@ flowchart TD
     B --> C[getPage + getContext]
     C --> D[ensureLoggedIn]
     D --> E[dismissPopups]
-    E --> F[Read lastSearchContext]
-    F --> G{Context exists?}
-    G -- No --> H[Return error: run search_products first]
-    G -- Yes --> I[Ensure current page URL matches saved search URL]
-    I --> J[Read visible product tiles from search result page]
-    J --> K{For each requested item}
-    K --> L[Match item by exact/partial name against saved results]
-    L --> M{Matched and available?}
-    M -- No --> N[Report unavailable/not found + alternatives]
-    M -- Yes --> O[Click tile 'Do koszyka' x quantity]
-    O --> P[Add success result]
-    N --> Q{Next item?}
-    P --> Q
-    Q -- Yes --> K
-    Q -- No --> R[Return summary + source search URL]
+    E --> F{Item has productUrl?}
+    F -- Yes --> G[Navigate to product page]
+    G --> H[Click 'Do koszyka' on product page]
+    H --> I[Set quantity if > 1]
+    I --> P[Add success result]
+    F -- No --> J[Read lastSearchContext]
+    J --> K{Context exists?}
+    K -- No --> L[Return error: run search_products first]
+    K -- Yes --> M[Ensure current page URL matches saved search URL]
+    M --> N[Read visible product tiles from search result page]
+    N --> O{Match item by name against saved results}
+    O -- Not found / unavailable --> Q[Report unavailable + alternatives]
+    O -- Matched --> R[Click tile 'Do koszyka' x quantity]
+    R --> P
+    P --> S{Next item?}
+    Q --> S
+    S -- Yes --> F
+    S -- No --> T[Return summary]
 ```
+
+## 4) Product Page HTML Parsing
+
+`extractProductPageInfoFromHtml` in `helpers.ts` extracts structured data from frisco.pl product pages. The parser handles different product types: food with full nutrition, food with partial/no nutrition, non-food items, and promotional products.
+
+```mermaid
+flowchart TD
+    HTML[Product Page HTML] --> N[Name]
+    HTML --> PR[Price]
+    HTML --> W[Weight]
+    HTML --> I[Ingredients]
+    HTML --> M[Macros / Nutrition]
+
+    N --> N1{div.new-product-page__product-details\nitemprop=name content=...}
+    N1 -- found --> N2[Use content attr]
+    N1 -- not found --> N3{h1.title.product}
+    N3 -- not found --> N4[Generic h1]
+
+    PR --> PR1{meta itemprop=price}
+    PR1 -- found --> PR2[Format as 'X,XX zł']
+    PR1 -- not found --> PR3{.f-pdp__price-amount--emphasized\nor --highlighted}
+
+    PR --> PR4{.f-pdp__price-amount--plain}
+    PR4 -- found --> PR5[originalPrice]
+    PR --> PR6{div.f-pdp__unit-price}
+    PR6 -- found --> PR7[unitPrice]
+
+    W --> W1{div.product-grammage}
+    W1 -- found --> W2[Parse: 330 ml, ~500 g, 1 kg, 1 szt]
+    W1 -- not found --> W3{grammage-gross-parameter strong}
+    W3 -- not found --> W4[Fallback: title tag]
+
+    I --> I1{brandbank-ingredients p}
+    I1 -- found --> I2[Join paragraph texts]
+    I1 -- not found --> I3{expandable-block\n'Skład i alergeny'}
+
+    M --> M1{nutrient-gauge divs exist?}
+    M1 -- Yes --> M2[Extract title+value from each gauge\nSkip zero values]
+    M1 -- No --> M3{div.fpp table?}
+    M3 -- Yes --> M4[Extract from table rows\nlabel in td:first, value in td:second]
+    M3 -- No --> M5{expandable-block\n'Wartości odżywcze' text?}
+    M5 -- Yes --> M6[Regex extraction from text]
+    M5 -- No --> M7[Empty macros]
+```
+
+### Product types vs. extracted data
+
+| Product type | Example | Weight | Macros | Ingredients | Original price |
+|---|---|---|---|---|---|
+| Dairy (full nutrition) | Skyr, Mascarpone | ml / g | Full (gauge) | Sometimes | If on promotion |
+| Meat (table format) | Chicken filet | ~g (approx) | Table (may be empty) | brandbank | No |
+| Fruit | Bananas | ~kg (approx) | Partial (gauge) | No | No |
+| Eggs (by piece) | Free-range eggs | szt | No | No | No |
+| Non-food | Trash bags | szt | Zeroes → empty | No | No |
