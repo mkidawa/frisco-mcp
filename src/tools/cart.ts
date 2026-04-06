@@ -49,10 +49,23 @@ export async function addItemsToCart(
     const qty = item.quantity ?? 1;
 
     try {
-      const { foundName, addButton } = await searchNavigateAndCache(page, query);
+      const { foundName, addButton, unavailable, alternatives } = await searchNavigateAndCache(page, query);
 
       if (!addButton) {
-        results.push(`⚠️  ${name}: not found on frisco.pl`);
+        if (unavailable) {
+          let msg = `⚠️  ${name}: produkt "${foundName}" jest chwilowo niedostępny`;
+          if (alternatives && alternatives.length > 0) {
+            msg += `\n   Dostępne alternatywy:`;
+            for (const alt of alternatives) {
+              const w = alt.weight ? ` [${alt.weight}]` : '';
+              const p = alt.price ? ` | ${alt.price}` : '';
+              msg += `\n   - ${alt.name}${w}${p}`;
+            }
+          }
+          results.push(msg);
+        } else {
+          results.push(`⚠️  ${name}: not found on frisco.pl`);
+        }
         continue;
       }
 

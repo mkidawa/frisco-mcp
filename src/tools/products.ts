@@ -53,9 +53,12 @@ export async function searchProducts(query: string, topN: number = 5): Promise<s
           }
         }
 
-        return { name, price, weight };
+        const unavailable = !!box.querySelector('.unavailable-info') ||
+          !!box.querySelector('article.unavailable');
+
+        return { name, price, weight, available: !unavailable };
       });
-    }, topN)) as { name: string; price: string; weight: string }[];
+    }, topN)) as { name: string; price: string; weight: string; available: boolean }[];
 
     if (!products.length) return `❌ No products found for: "${query}"`;
 
@@ -64,7 +67,8 @@ export async function searchProducts(query: string, topN: number = 5): Promise<s
       const p = products[i];
       const weightPart = p.weight ? ` [${p.weight}]` : '';
       const pricePart = p.price ? ` | ${p.price}` : '';
-      lines.push(`${i + 1}. ${p.name}${weightPart}${pricePart}`);
+      const availPart = p.available ? '' : ' ⚠️ NIEDOSTĘPNY';
+      lines.push(`${i + 1}. ${p.name}${weightPart}${pricePart}${availPart}`);
     }
     return lines.join('\n');
   } catch (err) {

@@ -141,10 +141,17 @@ export function extractProductPageInfoFromHtml(html: string): ProductPageInfo {
   return { name, price, weight, ingredients, macros };
 }
 
+export interface SearchNavigateResult {
+  foundName: string;
+  addButton: import('playwright').Locator | null;
+  unavailable?: boolean;
+  alternatives?: Array<{ name: string; price: string; weight: string }>;
+}
+
 export async function searchNavigateAndCache(
   page: Page,
   query: string
-): Promise<{ foundName: string; addButton: import('playwright').Locator | null }> {
+): Promise<SearchNavigateResult> {
   await page.getByRole('textbox', { name: 'Wyszukaj' }).click();
   const searchInput = page.getByRole('textbox', { name: 'Jakiego produktu szukasz?' });
   await searchInput.fill(query);
@@ -152,7 +159,7 @@ export async function searchNavigateAndCache(
   await page.waitForLoadState('domcontentloaded');
   await page.waitForTimeout(2_000);
 
-  const productUrl: string | null = await page.evaluate(() => {
+  const searchPageInfo = await page.evaluate(() => {
     function notInSidebar(el: HTMLElement) {
       let node = el.parentElement;
       while (node) {
@@ -164,11 +171,60 @@ export async function searchNavigateAndCache(
       return rect.left <= window.innerWidth * 0.65;
     }
 
-    const link = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href*="/pid,"][title]'))
-      .find(el => el.offsetParent !== null && notInSidebar(el));
-    return link ? link.href : null;
-  });
+    const boxes = Array.from(document.querySelectorAll<HTMLElement>('.product-box_holder'))
+      .filter(el => el.offsetParent !== null && notInSidebar(el))
+      .slice(0, 10);
 
+    return boxes.map(box => {
+      const nameEl = box.querySelector<HTMLAnchorElement>('a[title]');
+      const name = nameEl ? nameEl.title : '?';
+      const link = box.querySelector<HTMLAnchorElement>('a[href*="/pid,"][title]');
+      const href = link ? link.href : null;
+
+      const priceEl = box.querySelector<HTMLElement>('[class*="price"], [class*="Price"]');
+      const price = priceEl ? priceEl.innerText.trim().replace(/\s+/g, ' ') : '';
+
+      let weight = '';
+      const weightEl = box.querySelector<HTMLElement>('.f-pc-weight__text');
+      if (weightEl) {
+        const raw = weightEl.innerText.trim().replace(/\s+/g, ' ');
+        const wm = raw.match(/^~?([\d.,]+\s*(?:g|ml|kg|l|szt\.?|pcs)\b)/i);
+        if (wm) weight = wm[1];
+      }
+      if (!weight) {
+        const imgEl = box.querySelector<HTMLImageElement>('img[alt]');
+        if (imgEl?.alt) {
+          const am = imgEl.alt.match(/([\d.,]+\s*(?:g|ml|kg|l|szt\.?|pcs))\s*$/i);
+          if (am) weight = am[1].replace(/\u00a0/g, ' ');
+        }
+      }
+
+      const unavailable = !!box.querySelector('.unavailable-info') ||
+        !!box.querySelector('article.unavailable');
+
+      return { name, href, price, weight, unavailable };
+    });
+  }) as Array<{ name: string; href: string | null; price: string; weight: string; unavailable: boolean }>;
+
+  if (!searchPageInfo.length) return { foundName: query, addButton: null };
+
+  const first = searchPageInfo[0];
+
+  if (first.unavailable) {
+    const alternatives = searchPageInfo
+      .filter(p => !p.unavailable && p.href)
+      .slice(0, 5)
+      .map(p => ({ name: p.name, price: p.price, weight: p.weight }));
+
+    return {
+      foundName: first.name,
+      addButton: null,
+      unavailable: true,
+      alternatives,
+    };
+  }
+
+  const productUrl = first.href;
   if (!productUrl) return { foundName: query, addButton: null };
 
   const fullUrl = productUrl.startsWith('http')
