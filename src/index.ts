@@ -3,8 +3,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 
 import { login, finishSession, clearSession } from "./tools/session.js";
-import { addItemsToCart, viewCart, removeItemFromCart } from "./tools/cart.js";
-import { searchProducts, getProductInfo } from "./tools/products.js";
+import { addItemsToCart, viewCart, removeItemFromCart, checkCartIssues, viewPromotions, updateItemQuantity } from "./tools/cart.js";
+import { searchProducts, getProductInfo, getProductReviews } from "./tools/products.js";
 import {
   initLogger,
   logEvent,
@@ -223,6 +223,69 @@ server.registerTool(
   },
 );
 
+
+server.registerTool(
+  "check_cart_issues",
+  {
+    description:
+      "Checks the cart for sold-out or unavailable products and lists available substitutes for each.",
+  },
+  async () => {
+    return executeTool("check_cart_issues", {}, () => checkCartIssues());
+  },
+);
+
+server.registerTool(
+  "get_product_reviews",
+  {
+    description:
+      "Gets customer reviews and ratings for a product from Trustmate.",
+    inputSchema: {
+      query: z.string().describe("Product name or search query"),
+      limit: z
+        .number()
+        .default(5)
+        .describe("Max number of reviews to return (default 5)"),
+    },
+  },
+  async ({ query, limit }) => {
+    return executeTool("get_product_reviews", { query, limit }, () =>
+      getProductReviews(query, limit),
+    );
+  },
+);
+
+server.registerTool(
+  "view_promotions",
+  {
+    description:
+      "Shows active promotions, discounts, and total savings in the current cart.",
+  },
+  async () => {
+    return executeTool("view_promotions", {}, () => viewPromotions());
+  },
+);
+
+server.registerTool(
+  "update_item_quantity",
+  {
+    description:
+      "Changes the quantity of a product already in the cart (partial name match supported).",
+    inputSchema: {
+      productName: z
+        .string()
+        .describe("Full or partial name of the product"),
+      quantity: z
+        .number()
+        .describe("New quantity to set"),
+    },
+  },
+  async ({ productName, quantity }) => {
+    return executeTool("update_item_quantity", { productName, quantity }, () =>
+      updateItemQuantity(productName, quantity),
+    );
+  },
+);
 
 async function run() {
   await initLogger();

@@ -27,6 +27,25 @@ flowchart LR
     I --> K
 ```
 
+### Registered Tools
+
+| Tool | Module | Description |
+|------|--------|-------------|
+| `login` | session.ts | Open browser for manual login |
+| `finish_session` | session.ts | Open checkout page |
+| `clear_session` | session.ts | Clear session and close browser |
+| `search_products` | products.ts | Search products with prices and availability |
+| `get_product_info` | products.ts | Detailed product info (macros, ingredients) |
+| `get_product_reviews` | products.ts | Customer reviews and ratings (Trustmate) |
+| `add_items_to_cart` | cart.ts | Search and add products to cart |
+| `view_cart` | cart.ts | View current cart contents |
+| `remove_item_from_cart` | cart.ts | Remove a product from cart |
+| `update_item_quantity` | cart.ts | Change quantity of a product in cart |
+| `check_cart_issues` | cart.ts | Detect sold-out items and list substitutes |
+| `view_promotions` | cart.ts | Show active promotions and savings |
+| `get_logs` | logger.ts | Read session log events |
+| `tail_logs` | logger.ts | Read recent log events |
+
 ## 2) Login and Session Flow
 
 ```mermaid

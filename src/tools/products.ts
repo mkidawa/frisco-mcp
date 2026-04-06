@@ -1,6 +1,6 @@
 import { getPage, getContext, productCache } from '../browser.js';
 import { ensureLoggedIn } from '../auth.js';
-import { formatProductInfo, extractProductPageInfoFromHtml } from './helpers.js';
+import { formatProductInfo, extractProductPageInfoFromHtml, extractReviewsFromHtml, formatReviews } from './helpers.js';
 import type { Product } from '../types.js';
 
 export async function searchProducts(query: string, topN: number = 5): Promise<string> {
@@ -149,5 +149,53 @@ export async function getProductInfo(query: string): Promise<string> {
     return formatProductInfo(product);
   } catch (err) {
     return `❌ Failed to extract product info: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
+export async function getProductReviews(query: string, limit: number = 5): Promise<string> {
+  const page = await getPage();
+  const context = await getContext();
+  await ensureLoggedIn(page, context);
+
+  try {
+    await page.getByRole('textbox', { name: 'Wyszukaj' }).click();
+    const searchInput = page.getByRole('textbox', { name: 'Jakiego produktu szukasz?' });
+    await searchInput.fill(query);
+    await searchInput.press('Enter');
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(2_000);
+
+    const productUrl: string | null = await page.evaluate(() => {
+      function notInSidebar(el: HTMLElement) {
+        let node = el.parentElement;
+        while (node) {
+          const cls = (node.className || '').toString().toLowerCase();
+          if (cls.includes('cart') || cls.includes('basket') || cls.includes('mini-cart')) return false;
+          node = node.parentElement;
+        }
+        return el.getBoundingClientRect().left <= window.innerWidth * 0.65;
+      }
+      const link = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href*="/pid,"][title]'))
+        .find(el => el.offsetParent !== null && notInSidebar(el));
+      return link ? link.href : null;
+    });
+
+    if (!productUrl) return `❌ Nie znaleziono produktu: "${query}"`;
+
+    const fullUrl = productUrl.startsWith('http')
+      ? productUrl
+      : 'https://www.frisco.pl' + productUrl;
+
+    await page.goto(fullUrl, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(2_000);
+
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await page.waitForTimeout(1_000);
+
+    const html = await page.content();
+    const data = extractReviewsFromHtml(html);
+    return formatReviews(data, limit);
+  } catch (err) {
+    return `❌ Błąd pobierania opinii: ${err instanceof Error ? err.message : String(err)}`;
   }
 }

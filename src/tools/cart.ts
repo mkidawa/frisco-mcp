@@ -1,6 +1,13 @@
 import { getPage, getContext } from '../browser.js';
 import { ensureLoggedIn } from '../auth.js';
-import { searchNavigateAndCache, dismissPopups } from './helpers.js';
+import {
+  searchNavigateAndCache,
+  dismissPopups,
+  extractCartIssuesFromHtml,
+  formatCartIssues,
+  extractPromotionsFromHtml,
+  formatPromotions,
+} from './helpers.js';
 import type { CartItem } from '../types.js';
 
 async function clearCart(page: import('playwright').Page): Promise<void> {
@@ -195,5 +202,85 @@ export async function viewCart(): Promise<string> {
     return lines.join('\n');
   } catch (err) {
     return `❌ Failed to read cart: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
+export async function checkCartIssues(): Promise<string> {
+  const page = await getPage();
+  const context = await getContext();
+  await ensureLoggedIn(page, context);
+
+  await page.goto('https://www.frisco.pl/stn,cart', { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(2_000);
+
+  try {
+    const html = await page.content();
+    const issues = extractCartIssuesFromHtml(html);
+    return formatCartIssues(issues);
+  } catch (err) {
+    return `❌ Failed to check cart issues: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
+export async function viewPromotions(): Promise<string> {
+  const page = await getPage();
+  const context = await getContext();
+  await ensureLoggedIn(page, context);
+
+  await page.goto('https://www.frisco.pl/stn,cart', { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(2_000);
+
+  try {
+    const html = await page.content();
+    const data = extractPromotionsFromHtml(html);
+    return formatPromotions(data);
+  } catch (err) {
+    return `❌ Failed to read promotions: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
+export async function updateItemQuantity(productName: string, quantity: number): Promise<string> {
+  const page = await getPage();
+  const context = await getContext();
+  await ensureLoggedIn(page, context);
+
+  await page.goto('https://www.frisco.pl/stn,cart', { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(2_000);
+
+  const needle = productName.toLowerCase();
+
+  try {
+    const found = await page.evaluate((target: string) => {
+      const boxes = Array.from(
+        document.querySelectorAll<HTMLElement>('.mini-product-box_wrapper.in-cart'),
+      );
+
+      for (const box of boxes) {
+        const nameEl = box.querySelector<HTMLAnchorElement>('a[title]');
+        const name = nameEl?.title?.toLowerCase() ?? '';
+        if (name.includes(target)) {
+          return nameEl?.title ?? target;
+        }
+      }
+      return null;
+    }, needle);
+
+    if (!found) {
+      return `⚠️ Produkt "${productName}" nie znaleziony w koszyku.`;
+    }
+
+    const qtyInput = page.locator(`.mini-product-box_wrapper.in-cart:has(a[title*="${found}" i]) .cart-button_quantity`).first();
+
+    if (!(await qtyInput.isVisible({ timeout: 3_000 }).catch(() => false))) {
+      return `⚠️ Nie można zmienić ilości "${found}" — nie znaleziono pola ilości.`;
+    }
+
+    await qtyInput.fill(String(quantity));
+    await qtyInput.press('Enter');
+    await page.waitForTimeout(1_500);
+
+    return `✅ Zmieniono ilość "${found}" na ${quantity}.\n👉 https://www.frisco.pl/stn,cart`;
+  } catch (err) {
+    return `❌ Błąd zmiany ilości: ${err instanceof Error ? err.message : String(err)}`;
   }
 }
