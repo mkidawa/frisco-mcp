@@ -23,6 +23,7 @@ flowchart LR
     E --> I
 
     H --> J[(~/.frisco-mcp/session.json)]
+    G --> N[(in-memory lastSearchContext)]
     G --> K[frisco.pl]
     I --> K
 ```
@@ -34,10 +35,10 @@ flowchart LR
 | `login` | session.ts | Open browser for manual login |
 | `finish_session` | session.ts | Open checkout page |
 | `clear_session` | session.ts | Clear session and close browser |
-| `search_products` | products.ts | Search products with prices and availability |
+| `search_products` | products.ts | Search products + save search URL/context |
 | `get_product_info` | products.ts | Detailed product info (macros, ingredients) |
 | `get_product_reviews` | products.ts | Customer reviews and ratings (Trustmate) |
-| `add_items_to_cart` | cart.ts | Search and add products to cart |
+| `add_items_to_cart` | cart.ts | Add products from latest saved search result page |
 | `view_cart` | cart.ts | View current cart contents |
 | `remove_item_from_cart` | cart.ts | Remove a product from cart |
 | `update_item_quantity` | cart.ts | Change quantity of a product in cart |
@@ -81,20 +82,19 @@ flowchart TD
     B --> C[getPage + getContext]
     C --> D[ensureLoggedIn]
     D --> E[dismissPopups]
-    E --> F[clearCart]
-    F --> G{For each product}
-
-    G --> H["searchNavigateAndCache(query)"]
-    H --> U{First result<br/>unavailable?}
-    U -- Yes --> V["Collect available alternatives"]
-    V --> W["Report unavailable + alternatives"]
-    U -- No --> I{Found 'Do koszyka'<br/>button?}
-    I -- No --> J[Add warning result]
-    I -- Yes --> K["Click 'Do koszyka' x quantity"]
-    K --> L[Add success result]
-    W --> M{Next product?}
-    J --> M
-    L --> M
-    M -- Yes --> G
-    M -- No --> N[Return summary]
+    E --> F[Read lastSearchContext]
+    F --> G{Context exists?}
+    G -- No --> H[Return error: run search_products first]
+    G -- Yes --> I[Ensure current page URL matches saved search URL]
+    I --> J[Read visible product tiles from search result page]
+    J --> K{For each requested item}
+    K --> L[Match item by exact/partial name against saved results]
+    L --> M{Matched and available?}
+    M -- No --> N[Report unavailable/not found + alternatives]
+    M -- Yes --> O[Click tile 'Do koszyka' x quantity]
+    O --> P[Add success result]
+    N --> Q{Next item?}
+    P --> Q
+    Q -- Yes --> K
+    Q -- No --> R[Return summary + source search URL]
 ```

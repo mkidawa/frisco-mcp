@@ -171,12 +171,12 @@ server.registerTool(
   "add_items_to_cart",
   {
     description:
-      "Searches for and adds a list of products to the cart. By default appends to current cart, optionally clearing it first.",
+      "Adds products to cart by selecting from the most recent search_products result page. No additional search is performed.",
     inputSchema: {
       items: z
         .string()
         .describe(
-          'JSON array of items, e.g. [{"name":"Milk","searchQuery":"mleko 2l","quantity":2}]',
+          'JSON array of items, e.g. [{"name":"PIĄTNICA Skyr naturalny","quantity":2}]',
         ),
       clearCartFirst: z
         .boolean()
@@ -195,7 +195,7 @@ server.registerTool(
   "search_products",
   {
     description:
-      "Searches frisco.pl for products and returns top matches with prices.",
+      "Searches frisco.pl for products, returns top matches with prices, and saves the search URL/context for add_items_to_cart.",
     inputSchema: {
       query: z.string().describe("Product name to search for"),
       topN: z

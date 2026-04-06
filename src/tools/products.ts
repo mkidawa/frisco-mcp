@@ -1,7 +1,7 @@
-import { getPage, getContext, productCache } from '../browser.js';
+import { getPage, getContext, productCache, setLastSearchContext } from '../browser.js';
 import { ensureLoggedIn } from '../auth.js';
 import { formatProductInfo, extractProductPageInfoFromHtml, extractReviewsFromHtml, formatReviews } from './helpers.js';
-import type { Product } from '../types.js';
+import type { Product, SearchResultItem } from '../types.js';
 
 export async function searchProducts(query: string, topN: number = 5): Promise<string> {
   const page = await getPage();
@@ -70,15 +70,20 @@ export async function searchProducts(query: string, topN: number = 5): Promise<s
 
     if (!products.length) return `❌ No products found for: "${query}"`;
 
-    const lines = [`🔍 Search results for "${query}":\n`];
+    const searchResults: SearchResultItem[] = [];
+    const searchUrl = page.url();
+
+    const lines = [`🔍 Search results for "${query}" (saved context):\n`];
     for (let i = 0; i < products.length; i++) {
       const p = products[i];
       const href = p.href;
+      const fullUrl = typeof href === 'string'
+        ? (href.startsWith('http') ? href : `https://www.frisco.pl${href}`)
+        : null;
       if (p.available && typeof href === 'string') {
-        const fullUrl = href.startsWith('http') ? href : `https://www.frisco.pl${href}`;
         const cachedProduct: Product = {
           name: p.name,
-          url: fullUrl,
+          url: fullUrl!,
           price: p.price || '',
           weight: p.weight || null,
           macros: {},
@@ -86,11 +91,26 @@ export async function searchProducts(query: string, topN: number = 5): Promise<s
         };
         productCache.set(p.name, cachedProduct);
       }
+      searchResults.push({
+        name: p.name,
+        url: fullUrl,
+        price: p.price || '',
+        weight: p.weight || '',
+        available: p.available,
+      });
       const weightPart = p.weight ? ` [${p.weight}]` : '';
       const pricePart = p.price ? ` | ${p.price}` : '';
       const availPart = p.available ? '' : ' ⚠️ NIEDOSTĘPNY';
       lines.push(`${i + 1}. ${p.name}${weightPart}${pricePart}${availPart}`);
     }
+    setLastSearchContext({
+      query,
+      searchUrl,
+      results: searchResults,
+      updatedAt: Date.now(),
+    });
+    lines.push('');
+    lines.push(`🔗 Search URL: ${searchUrl}`);
     return lines.join('\n');
   } catch (err) {
     return `❌ Search error: ${err instanceof Error ? err.message : String(err)}`;

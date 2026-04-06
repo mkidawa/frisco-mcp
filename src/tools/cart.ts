@@ -1,14 +1,13 @@
-import { getPage, getContext, productCache } from "../browser.js";
+import { getPage, getContext, getLastSearchContext } from "../browser.js";
 import { ensureLoggedIn } from "../auth.js";
 import {
-  searchNavigateAndCache,
   dismissPopups,
   extractCartIssuesFromHtml,
   formatCartIssues,
   extractPromotionsFromHtml,
   formatPromotions,
 } from "./helpers.js";
-import type { CartItem } from "../types.js";
+import type { CartItem, SearchResultItem } from "../types.js";
 
 const CART_URL = "https://www.frisco.pl/stn,cart";
 const CART_READY_WAIT_MS = 2_000;
@@ -34,82 +33,171 @@ function normalizeLookup(text: string): string {
     .trim();
 }
 
-function findCachedProduct(...candidates: Array<string | undefined>): {
-  name: string;
-  url: string;
-  price?: string | null;
-  weight?: string | null;
-} | null {
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-    const direct = productCache.get(candidate);
-    if (direct?.url) return direct;
-  }
-
-  const normalizedCandidates = candidates
-    .filter((value): value is string => Boolean(value))
-    .map(normalizeLookup);
-
-  if (normalizedCandidates.length === 0) return null;
-
-  for (const entry of productCache.values()) {
-    if (!entry.url) continue;
-    const normalizedName = normalizeLookup(entry.name);
-    if (normalizedCandidates.some((candidate) => candidate === normalizedName)) {
-      return entry;
-    }
-  }
-
-  return null;
-}
-
-async function findVisibleAddButton(
-  page: import("playwright").Page,
-): Promise<import("playwright").Locator | null> {
-  const buttonCandidates = [
-    page.locator(".new-product-page__actions .cart-button_add").first(),
-    page.locator(".new-product-page .cart-button_add").first(),
-    page.getByRole("button", { name: /do koszyka/i }).first(),
-    page.getByText("Do koszyka", { exact: true }).first(),
-    page.locator(".cart-button_add").first(),
-  ];
-
-  for (const candidate of buttonCandidates) {
-    const visible = await candidate
-      .isVisible({ timeout: 1_000 })
-      .catch(() => false);
-    if (visible) return candidate;
-  }
-
-  return null;
-}
-
-async function resolveFromCachedProduct(
-  page: import("playwright").Page,
-  cached: { name: string; url: string; price?: string | null; weight?: string | null },
-): Promise<{
-  foundName: string;
-  foundPrice?: string;
-  foundWeight?: string;
-  addButton: import("playwright").Locator | null;
-  unavailable?: boolean;
-  alternatives?: Array<{ name: string; price: string; weight: string }>;
-}> {
-  await page.goto(cached.url, { waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(1_500);
-  await dismissPopups(page);
-
-  const addButton = await findVisibleAddButton(page);
-  return {
-    foundName: cached.name,
-    foundPrice: cached.price || undefined,
-    foundWeight: cached.weight || undefined,
-    addButton,
-  };
-}
-
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function normalizeFriscoUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.hash = "";
+    return `${parsed.origin}${parsed.pathname}${parsed.search}`;
+  } catch {
+    return url.trim();
+  }
+}
+
+function isSameSearchUrl(currentUrl: string, expectedUrl: string): boolean {
+  return normalizeFriscoUrl(currentUrl) === normalizeFriscoUrl(expectedUrl);
+}
+
+type SearchPageResult = {
+  name: string;
+  url: string | null;
+  price: string;
+  weight: string;
+  available: boolean;
+  hasAddButton: boolean;
+  domIndex: number;
+};
+
+async function readVisibleSearchResultsFromPage(
+  page: import("playwright").Page,
+): Promise<SearchPageResult[]> {
+  return (await page.evaluate(() => {
+    function notInSidebar(el: HTMLElement) {
+      let node = el.parentElement;
+      while (node) {
+        const cls = (node.className || "").toString().toLowerCase();
+        if (
+          cls.includes("cart") ||
+          cls.includes("basket") ||
+          cls.includes("mini-cart")
+        ) {
+          return false;
+        }
+        node = node.parentElement;
+      }
+      const rect = el.getBoundingClientRect();
+      return rect.left <= window.innerWidth * 0.65;
+    }
+
+    const allBoxes = Array.from(
+      document.querySelectorAll<HTMLElement>(".product-box_holder"),
+    );
+    const boxes = allBoxes.filter(
+      (el) => el.offsetParent !== null && notInSidebar(el),
+    );
+
+    return boxes.map((box) => {
+      const domIndex = allBoxes.indexOf(box);
+      const nameEl = box.querySelector<HTMLAnchorElement>("a[title]");
+      const name = (nameEl?.title || "?").trim();
+      const productLink = box.querySelector<HTMLAnchorElement>(
+        'a[href*="/pid,"][title]',
+      );
+      const href = productLink?.getAttribute("href") || productLink?.href || "";
+      const url = href
+        ? href.startsWith("http")
+          ? href
+          : `https://www.frisco.pl${href}`
+        : null;
+      const priceEl = box.querySelector<HTMLElement>(
+        '[class*="price"], [class*="Price"]',
+      );
+      const price = priceEl ? priceEl.innerText.trim().replace(/\s+/g, " ") : "";
+
+      let weight = "";
+      const weightEl = box.querySelector<HTMLElement>(".f-pc-weight__text");
+      if (weightEl) {
+        const raw = weightEl.innerText.trim().replace(/\s+/g, " ");
+        const wm = raw.match(/^~?([\d.,]+\s*(?:g|ml|kg|l|szt\.?|pcs)\b)/i);
+        if (wm) weight = wm[1];
+      }
+      if (!weight) {
+        const imgEl = box.querySelector<HTMLImageElement>("img[alt]");
+        if (imgEl?.alt) {
+          const am = imgEl.alt.match(
+            /([\d.,]+\s*(?:g|ml|kg|l|szt\.?|pcs))\s*$/i,
+          );
+          if (am) weight = am[1].replace(/\u00a0/g, " ");
+        }
+      }
+
+      const unavailable =
+        !!box.querySelector(".unavailable-info") ||
+        !!box.querySelector("article.unavailable");
+      const addButton = box.querySelector<HTMLElement>(
+        ".cart-button_add, button.cart-button_add",
+      );
+      const hasAddButton = Boolean(addButton);
+
+      return {
+        name,
+        url,
+        price,
+        weight,
+        available: !unavailable,
+        hasAddButton,
+        domIndex,
+      };
+    });
+  })) as SearchPageResult[];
+}
+
+async function ensureSearchResultsPage(
+  page: import("playwright").Page,
+  searchUrl: string,
+): Promise<void> {
+  if (!isSameSearchUrl(page.url(), searchUrl)) {
+    await page.goto(searchUrl, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(1_500);
+    await dismissPopups(page);
+  }
+}
+
+function pickResultForCartItem(
+  item: CartItem,
+  searchContextResults: SearchResultItem[],
+  pageResults: SearchPageResult[],
+): SearchPageResult | null {
+  const candidates = [item.name, item.searchQuery]
+    .filter((value): value is string => Boolean(value && value.trim()))
+    .map(normalizeLookup);
+  if (candidates.length === 0) return null;
+
+  function score(name: string): number {
+    const normalizedName = normalizeLookup(name);
+    for (const candidate of candidates) {
+      if (normalizedName === candidate) return 300;
+    }
+    for (const candidate of candidates) {
+      if (normalizedName.includes(candidate)) return 200;
+      if (candidate.includes(normalizedName)) return 150;
+    }
+    return 0;
+  }
+
+  const contextMatch = searchContextResults
+    .map((result) => ({ result, score: score(result.name) }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score)[0]?.result;
+  if (!contextMatch) return null;
+
+  if (contextMatch.url) {
+    const contextUrl = normalizeFriscoUrl(contextMatch.url);
+    const byUrl = pageResults.find(
+      (result) => result.url && normalizeFriscoUrl(result.url) === contextUrl,
+    );
+    if (byUrl) return byUrl;
+  }
+
+  const byName = pageResults
+    .map((result) => ({ result, score: score(result.name) }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score)[0]?.result;
+
+  return byName ?? null;
 }
 
 async function openCartPage(page: import("playwright").Page): Promise<void> {
@@ -400,65 +488,78 @@ export async function addItemsToCart(
     return "❌ Invalid input. Expected a JSON array of products.";
   }
 
+  const searchContext = getLastSearchContext();
+  if (!searchContext || searchContext.results.length === 0) {
+    return [
+      "❌ No saved search context found.",
+      "Run search_products first, then call add_items_to_cart with item names from that result list.",
+    ].join("\n");
+  }
+
   const page = await getPage();
   const context = await getContext();
   await ensureLoggedIn(page, context);
   await dismissPopups(page);
 
+  await ensureSearchResultsPage(page, searchContext.searchUrl);
+
   if (options.clearCartFirst === true) {
     await clearCartViaUi(page);
+    await ensureSearchResultsPage(page, searchContext.searchUrl);
+  }
+
+  const pageResults = await readVisibleSearchResultsFromPage(page);
+  if (pageResults.length === 0) {
+    return [
+      "❌ Saved search page does not contain visible product results.",
+      `Expected results URL: ${searchContext.searchUrl}`,
+      "Run search_products again to refresh context.",
+    ].join("\n");
   }
 
   const results: string[] = [];
 
   for (const item of products) {
     const displayName = item.name ?? "?";
-    const query = item.searchQuery ?? displayName;
-    const quantity = item.quantity ?? 1;
+    const quantityRaw = item.quantity ?? 1;
+    const quantity = Number.isFinite(quantityRaw) && quantityRaw > 0
+      ? Math.floor(quantityRaw)
+      : 1;
 
     try {
-      const cachedProduct = findCachedProduct(displayName, query);
-      let {
-        foundName,
-        foundPrice,
-        foundWeight,
-        addButton,
-        unavailable,
-        alternatives,
-      } = cachedProduct
-        ? await resolveFromCachedProduct(page, cachedProduct)
-        : await searchNavigateAndCache(page, query);
-
-      if (!addButton && cachedProduct) {
-        ({
-          foundName,
-          foundPrice,
-          foundWeight,
-          addButton,
-          unavailable,
-          alternatives,
-        } = await searchNavigateAndCache(page, query));
+      const selected = pickResultForCartItem(item, searchContext.results, pageResults);
+      if (!selected) {
+        results.push(
+          `⚠️ ${displayName}: not found in the latest search results (query: "${searchContext.query}")`,
+        );
+        continue;
       }
 
-      if (!addButton) {
-        if (unavailable) {
-          let message = `⚠️ ${displayName}: product "${foundName}" is currently unavailable`;
-          if (alternatives && alternatives.length > 0) {
-            message += "\n   Available alternatives:";
-            for (const alternative of alternatives) {
-              const weightPart = alternative.weight
-                ? ` [${alternative.weight}]`
-                : "";
-              const pricePart = alternative.price
-                ? ` | ${alternative.price}`
-                : "";
-              message += `\n   - ${alternative.name}${weightPart}${pricePart}`;
-            }
+      if (!selected.available || !selected.hasAddButton) {
+        const alternatives = pageResults
+          .filter((result) => result.available && result.hasAddButton && result.domIndex !== selected.domIndex)
+          .slice(0, 5);
+        let message = `⚠️ ${displayName}: product "${selected.name}" is currently unavailable`;
+        if (alternatives.length > 0) {
+          message += "\n   Available alternatives:";
+          for (const alternative of alternatives) {
+            const weightPart = alternative.weight ? ` [${alternative.weight}]` : "";
+            const pricePart = alternative.price ? ` | ${alternative.price}` : "";
+            message += `\n   - ${alternative.name}${weightPart}${pricePart}`;
           }
-          results.push(message);
-        } else {
-          results.push(`⚠️ ${displayName}: not found on frisco.pl`);
         }
+        results.push(message);
+        continue;
+      }
+
+      const addButton = page
+        .locator(".product-box_holder")
+        .nth(selected.domIndex)
+        .locator(".cart-button_add")
+        .first();
+      const visible = await addButton.isVisible({ timeout: 1_500 }).catch(() => false);
+      if (!visible) {
+        results.push(`⚠️ ${displayName}: add button not available for "${selected.name}"`);
         continue;
       }
 
@@ -466,9 +567,9 @@ export async function addItemsToCart(
         await addButton.click();
         await page.waitForTimeout(ITEM_ADD_WAIT_MS);
       }
-      const weightPart = foundWeight ? ` [${foundWeight}]` : "";
-      const pricePart = foundPrice ? ` — ${foundPrice}` : "";
-      results.push(`✅ ${foundName}${weightPart} ×${quantity}${pricePart}`);
+      const weightPart = selected.weight ? ` [${selected.weight}]` : "";
+      const pricePart = selected.price ? ` — ${selected.price}` : "";
+      results.push(`✅ ${selected.name}${weightPart} ×${quantity}${pricePart}`);
     } catch (error) {
       const message = getErrorMessage(error).slice(0, 120);
       results.push(`❌ ${displayName}: ${message}`);
@@ -484,6 +585,7 @@ export async function addItemsToCart(
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
     "⚠️ Payment is YOUR responsibility.",
     `👉 ${CART_URL}`,
+    `🔎 Source search: ${searchContext.searchUrl}`,
     "The browser is open — go to checkout when ready.",
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
   ].join("\n");

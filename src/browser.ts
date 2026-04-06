@@ -1,11 +1,20 @@
 import { chromium, Browser, BrowserContext, Page } from "playwright";
-import type { Product } from "./types.js";
+import type { Product, SearchContext } from "./types.js";
 
 let _browser: Browser | null = null;
 let _context: BrowserContext | null = null;
 let _page: Page | null = null;
 
 export const productCache = new Map<string, Product>();
+let _lastSearchContext: SearchContext | null = null;
+
+export function setLastSearchContext(context: SearchContext): void {
+  _lastSearchContext = context;
+}
+
+export function getLastSearchContext(): SearchContext | null {
+  return _lastSearchContext;
+}
 
 export async function getPage(): Promise<Page> {
   if (_browser !== null && !_browser.isConnected()) {
@@ -35,6 +44,7 @@ export async function closeBrowser(): Promise<void> {
   _context = null;
   _page = null;
   productCache.clear();
+  _lastSearchContext = null;
 }
 
 export function isBrowserOpen(): boolean {

@@ -22,7 +22,7 @@ A TypeScript **Model Context Protocol (MCP)** server that lets AI assistants (Cl
 
 | Tool                    | Description                                                                                                                                        |
 | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `add_items_to_cart`     | Accepts a JSON list of products (name, search query, quantity). Searches for each item and clicks "Add to cart". Optionally clears the cart first. |
+| `add_items_to_cart`     | Adds products by selecting from the most recent `search_products` result page (saved search URL/context). No additional search is performed.      |
 | `view_cart`             | Returns the current cart contents and total price.                                                                                                 |
 | `remove_item_from_cart` | Removes a specific product from the cart by name (partial match).                                                                                  |
 | `update_item_quantity`  | Changes the quantity of a product already in the cart (partial name match).                                                                         |
@@ -33,7 +33,7 @@ A TypeScript **Model Context Protocol (MCP)** server that lets AI assistants (Cl
 
 | Tool                   | Description                                                                                                   |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `search_products`      | Searches frisco.pl and returns top N results with prices and availability status.                              |
+| `search_products`      | Searches frisco.pl, returns top N results with prices/availability, and saves search URL/context for cart add. |
 | `get_product_info`     | Returns detailed product info: nutritional values (macros per 100g), weight/grammage, ingredients, and price.  |
 | `get_product_reviews`  | Returns customer reviews and ratings (from Trustmate) for a product.                                           |
 
@@ -69,6 +69,7 @@ flowchart LR
 
     H --> J[(~/.frisco-mcp/session.json)]
     B --> L[src/logger.ts] --> M[(~/.frisco-mcp/logs/)]
+    G --> N[(in-memory lastSearchContext)]
     G --> K[frisco.pl 🌐]
     I --> K
 ```
@@ -157,13 +158,13 @@ The `login` tool opens a Chromium window at `frisco.pl/login`. Log in manually �
 
 ### 2. Shop
 
-> _"Add 2 liters of milk and wheat bread to cart"_
-
-The `add_items_to_cart` tool searches for each product, picks the first match, and clicks "Add to cart" the requested number of times. If a product is temporarily unavailable, it reports the issue and lists available alternatives.
-
 > _"Find me natural yogurt"_
 
-The `search_products` tool returns a list of matching products with prices. Unavailable products are marked with ⚠️ NIEDOSTĘPNY.
+The `search_products` tool returns a list of matching products with prices. Unavailable products are marked with ⚠️ NIEDOSTĘPNY. It also saves the current search URL and result context for subsequent cart operations.
+
+> _"Add PIĄTNICA Skyr jogurt pitny typu islandzkiego wanilia to cart"_
+
+The `add_items_to_cart` tool selects products from the latest `search_products` results and clicks "Do koszyka" on that result page. It does not re-run product search. If the browser is on a different page, it navigates back to the saved search URL before adding.
 
 > _"Remove the butter from my cart"_
 
@@ -200,7 +201,7 @@ frisco-mcp/
 ├── src/
 │   ├── index.ts          # MCP server setup, tool registration
 │   ├── auth.ts           # Session cookie save/restore, login check
-│   ├── browser.ts        # Playwright browser singleton, product cache
+│   ├── browser.ts        # Playwright browser singleton, product cache, last search context
 │   ├── logger.ts         # JSONL session logging
 │   ├── types.ts          # Shared TypeScript types
 │   └── tools/

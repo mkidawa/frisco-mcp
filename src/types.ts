@@ -4,6 +4,21 @@ export interface CartItem {
   quantity?: number;
 }
 
+export interface SearchResultItem {
+  name: string;
+  url: string | null;
+  price: string;
+  weight: string;
+  available: boolean;
+}
+
+export interface SearchContext {
+  query: string;
+  searchUrl: string;
+  results: SearchResultItem[];
+  updatedAt: number;
+}
+
 export interface Macros {
   kcal?: string;
   protein?: string;
