@@ -114,23 +114,41 @@ export async function removeItemFromCart(productName: string): Promise<string> {
 
   try {
     const removed = await page.evaluate((target: string) => {
-      const boxes = Array.from(
-        document.querySelectorAll<HTMLElement>('.product-box_holder'),
-      ).filter(
-        (el) =>
-          el.offsetParent !== null &&
-          el.querySelector('.horizontal-product-box__delete-button'),
-      );
+      function cartLineDisplayName(box: HTMLElement): string | null {
+        const tImg = box.querySelector<HTMLImageElement>('.horizontal-product-box__product-img img[title]');
+        if (tImg?.title) return tImg.title.replace(/\s+/g, ' ').trim();
+        const aImg = box.querySelector<HTMLImageElement>('.horizontal-product-box__product-img img[alt]');
+        if (aImg?.alt) return aImg.alt.replace(/\s+/g, ' ').trim();
+        const brand = box.querySelector<HTMLElement>('.f-hpc__brand');
+        const bare = box.querySelector<HTMLElement>('.f-hpc__bare-name');
+        if (brand && bare) {
+          const bt = (brand.getAttribute('title') || brand.textContent || '').trim();
+          const nt = (bare.getAttribute('title') || bare.textContent || '').trim();
+          if (bt && nt) return `${bt} ${nt}`.replace(/\s+/g, ' ').trim();
+        }
+        const titled = box.querySelector<HTMLAnchorElement>('a[title]');
+        if (titled?.title) return titled.title.trim();
+        return null;
+      }
 
-      for (const box of boxes) {
-        const nameEl = box.querySelector<HTMLAnchorElement>('a[title]');
-        const name = nameEl?.title?.toLowerCase() ?? '';
-        if (name.includes(target)) {
-          const btn = box.querySelector<HTMLElement>(
-            '.horizontal-product-box__delete-button',
-          );
-          btn?.click();
-          return nameEl?.title ?? target;
+      function cartLineRoots(): HTMLElement[] {
+        const horiz = Array.from(
+          document.querySelectorAll<HTMLElement>('article.horizontal-product-box__wrapper'),
+        ).filter(
+          (el) => el.offsetParent !== null && el.querySelector('.horizontal-product-box__delete-button'),
+        );
+        if (horiz.length > 0) return horiz;
+        return Array.from(document.querySelectorAll<HTMLElement>('.product-box_holder')).filter(
+          (el) => el.offsetParent !== null && el.querySelector('.horizontal-product-box__delete-button'),
+        );
+      }
+
+      const t = target.toLowerCase();
+      for (const box of cartLineRoots()) {
+        const name = cartLineDisplayName(box);
+        if (name && name.toLowerCase().includes(t)) {
+          box.querySelector<HTMLElement>('.horizontal-product-box__delete-button')?.click();
+          return name;
         }
       }
       return null;
@@ -157,34 +175,64 @@ export async function viewCart(): Promise<string> {
 
   try {
     const result = (await page.evaluate(() => {
-      const boxes = Array.from(document.querySelectorAll<HTMLElement>('.product-box_holder'))
-        .filter(el => el.offsetParent !== null &&
-          el.querySelector('.horizontal-product-box__delete-button'));
+      function cartLineDisplayName(box: HTMLElement): string | null {
+        const tImg = box.querySelector<HTMLImageElement>('.horizontal-product-box__product-img img[title]');
+        if (tImg?.title) return tImg.title.replace(/\s+/g, ' ').trim();
+        const aImg = box.querySelector<HTMLImageElement>('.horizontal-product-box__product-img img[alt]');
+        if (aImg?.alt) return aImg.alt.replace(/\s+/g, ' ').trim();
+        const brand = box.querySelector<HTMLElement>('.f-hpc__brand');
+        const bare = box.querySelector<HTMLElement>('.f-hpc__bare-name');
+        if (brand && bare) {
+          const bt = (brand.getAttribute('title') || brand.textContent || '').trim();
+          const nt = (bare.getAttribute('title') || bare.textContent || '').trim();
+          if (bt && nt) return `${bt} ${nt}`.replace(/\s+/g, ' ').trim();
+        }
+        const titled = box.querySelector<HTMLAnchorElement>('a[title]');
+        if (titled?.title) return titled.title.trim();
+        return null;
+      }
 
-      const byName = new Map();
-      boxes.forEach(box => {
-        const nameEl = box.querySelector<HTMLAnchorElement>('a[title]');
-        const name = nameEl ? nameEl.title : null;
-        if (!name) return;
-        const priceEl = box.querySelector<HTMLElement>('[class*="price"], [class*="Price"]');
-        const price = priceEl ? priceEl.innerText.trim().replace(/\\s+/g, ' ') : '';
-        const qtyEl = box.querySelector(
-          'input[type="number"], [class*="stepper"], [class*="Quantity"], [class*="quantity"]'
-        ) as HTMLInputElement | HTMLElement | null;
-        const qty = qtyEl
-          ? (qtyEl instanceof HTMLInputElement ? qtyEl.value : qtyEl.innerText || '1').trim()
-          : '1';
-        if (!byName.has(name) || (!byName.get(name).price && price)) {
+      function cartLineRoots(): HTMLElement[] {
+        const horiz = Array.from(
+          document.querySelectorAll<HTMLElement>('article.horizontal-product-box__wrapper'),
+        ).filter(
+          (el) => el.offsetParent !== null && el.querySelector('.horizontal-product-box__delete-button'),
+        );
+        if (horiz.length > 0) return horiz;
+        return Array.from(document.querySelectorAll<HTMLElement>('.product-box_holder')).filter(
+          (el) => el.offsetParent !== null && el.querySelector('.horizontal-product-box__delete-button'),
+        );
+      }
+
+      const byName = new Map<string, { name: string; price: string; qty: string }>();
+      for (const box of cartLineRoots()) {
+        const name = cartLineDisplayName(box);
+        if (!name) continue;
+        const qtyEl = box.querySelector<HTMLInputElement>(
+          'input.cart-button_quantity, input[type="number"], [class*="stepper"], input[class*="Quantity"], input[class*="quantity"]',
+        );
+        const qty = qtyEl ? (qtyEl.value || '1').trim() : '1';
+        const priceEl = box.querySelector<HTMLElement>(
+          '.horizontal-product-box__cart-price-value, .horizontal-product-box__cart-price .price, [class*="price"], [class*="Price"]',
+        );
+        const price = priceEl ? priceEl.innerText.trim().replace(/\s+/g, ' ') : '';
+        const prev = byName.get(name);
+        if (!prev || (!prev.price && price)) {
           byName.set(name, { name, price, qty });
         }
-      });
+      }
 
       const items = Array.from(byName.values());
-      const totalEl = document.querySelector<HTMLElement>(
-        '[class*="summary"] [class*="price"], [class*="checkout"] [class*="total"], ' +
-        '[class*="Summary"] [class*="Price"], [class*="CartSummary"]'
+      const totalRow = document.querySelector<HTMLElement>(
+        '.generic-summary-box_frame-section-row.final.cta .generic-summary-box_frame-section-row-value',
       );
-      const total = totalEl ? totalEl.innerText.trim().replace(/\\s+/g, ' ') : null;
+      const totalEl =
+        totalRow ??
+        document.querySelector<HTMLElement>(
+          '[class*="summary"] [class*="price"], [class*="checkout"] [class*="total"], ' +
+            '[class*="Summary"] [class*="Price"], [class*="CartSummary"]',
+        );
+      const total = totalEl ? totalEl.innerText.trim().replace(/\s+/g, ' ') : null;
       return { items, total };
     })) as { items: { name: string; price: string; qty: string }[]; total: string | null };
 
