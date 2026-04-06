@@ -62,6 +62,12 @@ type SearchPageResult = {
   domIndex: number;
 };
 
+function extractProductPid(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const match = url.match(/\/pid,([^/?#]+)/i);
+  return match?.[1] ?? null;
+}
+
 async function readVisibleSearchResultsFromPage(
   page: import("playwright").Page,
 ): Promise<SearchPageResult[]> {
@@ -108,7 +114,9 @@ async function readVisibleSearchResultsFromPage(
       const priceEl = box.querySelector<HTMLElement>(
         '[class*="price"], [class*="Price"]',
       );
-      const price = priceEl ? priceEl.innerText.trim().replace(/\s+/g, " ") : "";
+      const price = priceEl
+        ? priceEl.innerText.trim().replace(/\s+/g, " ")
+        : "";
 
       let weight = "";
       const weightEl = box.querySelector<HTMLElement>(".f-pc-weight__text");
@@ -200,7 +208,9 @@ async function resolveAddButtonForResult(
   );
 
   for (const button of candidateButtons) {
-    const visible = await button.isVisible({ timeout: 1_000 }).catch(() => false);
+    const visible = await button
+      .isVisible({ timeout: 1_000 })
+      .catch(() => false);
     if (visible) return button;
   }
 
@@ -218,30 +228,108 @@ async function ensureSearchResultsPage(
   }
 }
 
+function isSameProductUrl(currentUrl: string, expectedUrl: string): boolean {
+  const currentPid = extractProductPid(currentUrl);
+  const expectedPid = extractProductPid(expectedUrl);
+  if (currentPid && expectedPid) return currentPid === expectedPid;
+  return normalizeFriscoUrl(currentUrl) === normalizeFriscoUrl(expectedUrl);
+}
+
+async function addProductFromCurrentProductPage(
+  page: import("playwright").Page,
+  quantity: number,
+): Promise<{ ok: boolean; reason?: string }> {
+  const addButton = page
+    .locator(
+      ".product-box-layout__cart .cart-button_add, .cart-button_add.button.primary.alone, .cart-button_add",
+    )
+    .first();
+  const plusButton = page
+    .locator(
+      ".product-box-layout__cart .cart-button_plus .cart-button__button, .cart-button_plus .cart-button__button, .cart-button_plus button",
+    )
+    .first();
+
+  for (let i = 0; i < quantity; i++) {
+    const canAdd = await addButton
+      .isVisible({ timeout: 1_000 })
+      .catch(() => false);
+    if (canAdd) {
+      await addButton.click();
+      await page.waitForTimeout(ITEM_ADD_WAIT_MS);
+      continue;
+    }
+
+    const canIncrease = await plusButton
+      .isVisible({ timeout: 1_000 })
+      .catch(() => false);
+    if (canIncrease) {
+      await plusButton.click();
+      await page.waitForTimeout(ITEM_ADD_WAIT_MS);
+      continue;
+    }
+
+    return {
+      ok: false,
+      reason:
+        "add button is not available on the product page (product may be unavailable)",
+    };
+  }
+
+  return { ok: true };
+}
+
 function pickResultForCartItem(
   item: CartItem,
   searchContextResults: SearchResultItem[],
   pageResults: SearchPageResult[],
 ): SearchPageResult | null {
+  const explicitUrl = item.productUrl?.trim();
+  if (explicitUrl) {
+    const byUrl = pageResults.find(
+      (result) => result.url && isSameProductUrl(result.url, explicitUrl),
+    );
+    if (byUrl) return byUrl;
+  }
+
+  const contextMatch = pickContextResultForCartItem(item, searchContextResults);
+  if (!contextMatch) return null;
+
+  if (contextMatch.url) {
+    const contextUrl = normalizeFriscoUrl(contextMatch.url);
+    const byUrl = pageResults.find(
+      (result) => result.url && normalizeFriscoUrl(result.url) === contextUrl,
+    );
+    if (byUrl) return byUrl;
+  }
+
+  const contextName = normalizeLookup(contextMatch.name);
+  const byName = pageResults.find(
+    (result) => normalizeLookup(result.name) === contextName,
+  );
+
+  return byName ?? null;
+}
+
+function pickContextResultForCartItem(
+  item: CartItem,
+  searchContextResults: SearchResultItem[],
+): SearchResultItem | null {
+  const explicitUrl = item.productUrl?.trim();
+  if (explicitUrl) {
+    const byUrl = searchContextResults.find(
+      (result) => result.url && isSameProductUrl(result.url, explicitUrl),
+    );
+    if (byUrl) return byUrl;
+  }
+
   const explicitName = item.name?.trim();
   if (explicitName) {
     const explicitNeedle = normalizeLookup(explicitName);
-    const exactContext = searchContextResults.find(
+    const exactByName = searchContextResults.find(
       (result) => normalizeLookup(result.name) === explicitNeedle,
     );
-    if (exactContext?.url) {
-      const exactContextUrl = normalizeFriscoUrl(exactContext.url);
-      const byExactUrl = pageResults.find(
-        (result) =>
-          result.url && normalizeFriscoUrl(result.url) === exactContextUrl,
-      );
-      if (byExactUrl) return byExactUrl;
-    }
-
-    const byExactName = pageResults.find(
-      (result) => normalizeLookup(result.name) === explicitNeedle,
-    );
-    if (byExactName) return byExactName;
+    if (exactByName) return exactByName;
   }
 
   const candidates = [item.name, item.searchQuery]
@@ -261,26 +349,12 @@ function pickResultForCartItem(
     return 0;
   }
 
-  const contextMatch = searchContextResults
-    .map((result) => ({ result, score: score(result.name) }))
-    .filter((entry) => entry.score > 0)
-    .sort((a, b) => b.score - a.score)[0]?.result;
-  if (!contextMatch) return null;
-
-  if (contextMatch.url) {
-    const contextUrl = normalizeFriscoUrl(contextMatch.url);
-    const byUrl = pageResults.find(
-      (result) => result.url && normalizeFriscoUrl(result.url) === contextUrl,
-    );
-    if (byUrl) return byUrl;
-  }
-
-  const byName = pageResults
-    .map((result) => ({ result, score: score(result.name) }))
-    .filter((entry) => entry.score > 0)
-    .sort((a, b) => b.score - a.score)[0]?.result;
-
-  return byName ?? null;
+  return (
+    searchContextResults
+      .map((result) => ({ result, score: score(result.name) }))
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => b.score - a.score)[0]?.result ?? null
+  );
 }
 
 async function openCartPage(page: import("playwright").Page): Promise<void> {
@@ -571,11 +645,16 @@ export async function addItemsToCart(
     return "❌ Invalid input. Expected a JSON array of products.";
   }
 
-  const searchContext = getLastSearchContext();
-  if (!searchContext || searchContext.results.length === 0) {
+  const needsSearchContext = products.some((product) => !product.productUrl);
+  const searchContext = needsSearchContext ? getLastSearchContext() : null;
+  if (
+    needsSearchContext &&
+    (!searchContext || searchContext.results.length === 0)
+  ) {
     return [
       "❌ No saved search context found.",
       "Run search_products first, then call add_items_to_cart with item names from that result list.",
+      "Or pass productUrl in each item to add directly from product pages.",
     ].join("\n");
   }
 
@@ -584,20 +663,10 @@ export async function addItemsToCart(
   await ensureLoggedIn(page, context);
   await dismissPopups(page);
 
-  await ensureSearchResultsPage(page, searchContext.searchUrl);
+  let pageResults: SearchPageResult[] | null = null;
 
   if (options.clearCartFirst === true) {
     await clearCartViaUi(page);
-    await ensureSearchResultsPage(page, searchContext.searchUrl);
-  }
-
-  const pageResults = await readVisibleSearchResultsFromPage(page);
-  if (pageResults.length === 0) {
-    return [
-      "❌ Saved search page does not contain visible product results.",
-      `Expected results URL: ${searchContext.searchUrl}`,
-      "Run search_products again to refresh context.",
-    ].join("\n");
   }
 
   const results: string[] = [];
@@ -605,12 +674,84 @@ export async function addItemsToCart(
   for (const item of products) {
     const displayName = item.name ?? "?";
     const quantityRaw = item.quantity ?? 1;
-    const quantity = Number.isFinite(quantityRaw) && quantityRaw > 0
-      ? Math.floor(quantityRaw)
-      : 1;
+    const quantity =
+      Number.isFinite(quantityRaw) && quantityRaw > 0
+        ? Math.floor(quantityRaw)
+        : 1;
 
     try {
-      const selected = pickResultForCartItem(item, searchContext.results, pageResults);
+      const explicitUrl = item.productUrl?.trim();
+      if (explicitUrl) {
+        if (!isSameProductUrl(page.url(), explicitUrl)) {
+          await page.goto(explicitUrl, { waitUntil: "domcontentloaded" });
+          await page.waitForTimeout(1_000);
+          await dismissPopups(page);
+        }
+        const added = await addProductFromCurrentProductPage(page, quantity);
+        if (!added.ok) {
+          results.push(
+            `⚠️ ${displayName}: ${added.reason ?? "could not add from product page"}`,
+          );
+          continue;
+        }
+        results.push(
+          `✅ ${displayName} ×${quantity} (added from product page)`,
+        );
+        pageResults = null;
+        continue;
+      }
+
+      if (!searchContext) {
+        results.push(
+          `⚠️ ${displayName}: search context is required when productUrl is missing`,
+        );
+        continue;
+      }
+
+      const contextSelected = pickContextResultForCartItem(
+        item,
+        searchContext.results,
+      );
+      if (
+        contextSelected?.url &&
+        isSameProductUrl(page.url(), contextSelected.url)
+      ) {
+        const added = await addProductFromCurrentProductPage(page, quantity);
+        if (!added.ok) {
+          results.push(
+            `⚠️ ${displayName}: ${added.reason ?? "could not add from current product page"}`,
+          );
+          continue;
+        }
+        const weightPart = contextSelected.weight
+          ? ` [${contextSelected.weight}]`
+          : "";
+        const pricePart = contextSelected.price
+          ? ` — ${contextSelected.price}`
+          : "";
+        results.push(
+          `✅ ${contextSelected.name}${weightPart} ×${quantity}${pricePart} (added from current product page)`,
+        );
+        pageResults = null;
+        continue;
+      }
+
+      if (pageResults === null) {
+        await ensureSearchResultsPage(page, searchContext.searchUrl);
+        pageResults = await readVisibleSearchResultsFromPage(page);
+        if (pageResults.length === 0) {
+          results.push(
+            `⚠️ ${displayName}: saved search page has no visible product results`,
+          );
+          continue;
+        }
+      }
+
+      const selected = pickResultForCartItem(
+        item,
+        searchContext.results,
+        pageResults,
+      );
       if (!selected) {
         results.push(
           `⚠️ ${displayName}: not found in the latest search results (query: "${searchContext.query}")`,
@@ -631,8 +772,12 @@ export async function addItemsToCart(
         if (alternatives.length > 0) {
           message += "\n   Available alternatives:";
           for (const alternative of alternatives) {
-            const weightPart = alternative.weight ? ` [${alternative.weight}]` : "";
-            const pricePart = alternative.price ? ` | ${alternative.price}` : "";
+            const weightPart = alternative.weight
+              ? ` [${alternative.weight}]`
+              : "";
+            const pricePart = alternative.price
+              ? ` | ${alternative.price}`
+              : "";
             message += `\n   - ${alternative.name}${weightPart}${pricePart}`;
           }
         }
@@ -642,7 +787,9 @@ export async function addItemsToCart(
 
       const addButton = await resolveAddButtonForResult(page, selected);
       if (!addButton) {
-        results.push(`⚠️ ${displayName}: add button not available for "${selected.name}"`);
+        results.push(
+          `⚠️ ${displayName}: add button not available for "${selected.name}"`,
+        );
         continue;
       }
 
@@ -668,7 +815,7 @@ export async function addItemsToCart(
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
     "⚠️ Payment is YOUR responsibility.",
     `👉 ${CART_URL}`,
-    `🔎 Source search: ${searchContext.searchUrl}`,
+    ...(searchContext ? [`🔎 Source search: ${searchContext.searchUrl}`] : []),
     "The browser is open — go to checkout when ready.",
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
   ].join("\n");

@@ -1,6 +1,7 @@
 export interface CartItem {
   name: string;
   searchQuery?: string;
+  productUrl?: string;
   quantity?: number;
 }
 

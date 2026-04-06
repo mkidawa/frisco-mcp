@@ -176,7 +176,7 @@ server.registerTool(
       items: z
         .string()
         .describe(
-          'JSON array of items, e.g. [{"name":"PIĄTNICA Skyr naturalny","quantity":2}]',
+          'JSON array of items, e.g. [{"name":"PIĄTNICA Skyr naturalny","quantity":2}] or [{"name":"...","productUrl":"https://www.frisco.pl/pid,...","quantity":1}]',
         ),
       clearCartFirst: z
         .boolean()
